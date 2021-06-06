@@ -6,9 +6,9 @@
 //
 //  GPLEX Version:  1.2.2
 //  Machine:  DESKTOP-35AC9H2
-//  DateTime: 04.06.2021 12:30:47
+//  DateTime: 06.06.2021 11:20:18
 //  UserName: Snail
-//  GPLEX input file <kompilator.lex - 04.06.2021 12:30:45>
+//  GPLEX input file <kompilator.lex - 06.06.2021 11:20:15>
 //  GPLEX frame file <embedded resource>
 //
 //  Option settings: parser, minimize
@@ -132,6 +132,12 @@ namespace GardensPoint
         const int INITIAL = 0;
 
 #region user code
+public override void yyerror(string erMsg, params object[] args)
+    {
+        Console.WriteLine(erMsg);
+        Console.WriteLine("SYNTAX ERROR LINE:" + Compiler.lineno);
+        Compiler.syntaxErrors++;
+    }
 #endregion user code
 
         int state;
@@ -1006,7 +1012,7 @@ return (int)Tokens.Eof;
             break;
         case 1:
         case 6:
-return (int)Tokens.error;
+yyerror(""); return (int)Tokens.error;
             break;
         case 2:
 { }

@@ -1,14 +1,16 @@
+
+// ==========================================================================
+//  GPLEX error listing for lex source file <kompilator.lex>
+// ==========================================================================
+//  Version:  1.2.2
+//  Machine:  DESKTOP-35AC9H2
+//  DateTime: 06.06.2021 10:45:20
+//  UserName: Snail
+// ==========================================================================
+
+
 %using QUT.Gppg;
 %namespace GardensPoint
-
-%{
-    public override void yyerror(string erMsg, params object[] args)
-    {
-        Console.WriteLine(erMsg);
-        Console.WriteLine("SYNTAX ERROR LINE:" + Compiler.lineno);
-        Compiler.syntaxErrors++;
-    }
-%}
 
 IntNumber     (0|[1-9][0-9]*)
 HexIntNumber  (0(x|X)([a-f0-9]+))
@@ -70,4 +72,8 @@ Str        \"(\\.|[^"\n\\])*\"
 {Str}				{ yylval.value=yytext; return (int)Tokens.Str; }
 {Comment}		    { Compiler.lineno++; }
 
-.					{ yyerror(""); return (int)Tokens.error; }
+.					{ throw new ErrorException($"Syntax error at line:{Compiler.lineno}"); }//-------------------------------^
+// Error: Illegal character in this context
+// ----------------------------------------
+// ==========================================================================
+

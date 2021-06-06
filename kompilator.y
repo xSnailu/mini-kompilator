@@ -25,7 +25,7 @@ START:          Program BLOCK
 
 BLOCK:          LeftCurlyBracket DECL_LIST STMT_LIST RightCurlyBracket
                 {
-                    $$ = new StatementNode($2, $3);
+                    $$ = new StatementNode($2, $3); 
                 }
 ;
 
@@ -301,8 +301,7 @@ UNARY_EXPR:     IntNumber
                 }
 |               False
                 {
-                $$ = new ValueNode("bool", "false
-                ");
+                $$ = new ValueNode("bool", "false");
                 }
 |               Ident
                 {
