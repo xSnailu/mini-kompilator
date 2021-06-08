@@ -7,7 +7,7 @@ public ExpressionNode             EXPnode;
 public SyntaxTreeNode             STMTnode;
 }
 
-%token Program If Else While Read Write Return Int Double Bool Hex Eof
+%token Program If Else While Read Write Return Int Double Bool Hex Eof Error
 %token Assign LogOr LogAnd BitOr BitAnd Equal Unequal Greater GreaterOrEqual Less LessOrEqual Plus Minus Multiplies Division LogNegation BitNegation LeftBracket RightBracket LeftCurlyBracket RightCurlyBracket Comma Semicolon
 
 %token <value>   IntNumber RealNumber Ident Str True False Type HexIntNumber
@@ -20,6 +20,21 @@ public SyntaxTreeNode             STMTnode;
 START:          Program BLOCK
                 {
                     Compiler.rootNode = $2;
+                }
+|               Program error Eof
+                {
+                    Console.WriteLine("SYNTAX ERROR. LINE: " + Compiler.lineno);
+                    Compiler.errors++;
+                }
+|               Program LeftBracket DECL_LIST STMT_LIST Eof
+                {
+                    Console.WriteLine("SYNTAX ERROR. LINE: " + Compiler.lineno);
+                    Compiler.errors++;
+                }
+|               Eof
+                {
+                    Console.WriteLine("SYNTAX ERROR. LINE: " + Compiler.lineno);
+                    Compiler.errors++;
                 }
 ;
 

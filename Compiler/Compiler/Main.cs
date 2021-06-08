@@ -41,8 +41,8 @@ public class Compiler
         else
         {
             Console.Write("\nsource file:  ");
-            //file = Console.ReadLine();
-            file = "test.txt";
+            file = Console.ReadLine();
+            //file = "test.txt";
         }
         try
         {
@@ -75,8 +75,7 @@ public class Compiler
         }
         source.Close();
 
-        // sprawdzenie syntax błędów
-        if (syntaxErrors > 0)
+        if (errors > 0)
         {
             return 1;
         }
@@ -677,7 +676,7 @@ public class ReadNode : SyntaxTreeNode
                 break;
             case CompilerType.Double_type:
                 Compiler.EmitCode($"{tempIdent} = alloca double");
-                Compiler.EmitCode($"call i32 (i8*, ...) @scanf(i8* bitcast ([3 x i8]* @read_double to i8*), double* {tempIdent})");
+                Compiler.EmitCode($"call i32 (i8*, ...) @scanf(i8* bitcast ([4 x i8]* @read_double to i8*), double* {tempIdent})");
                 Compiler.EmitCode($"{bufIdent} = load double, double* {tempIdent}");
                 Compiler.EmitCode($"store double {bufIdent}, double* %{ident}");
                 break;
@@ -1352,7 +1351,7 @@ public class DivisionNode : ExpressionNode
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "div i32", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "sdiv i32", leftVal, rightVal);
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
@@ -1836,7 +1835,7 @@ public class GreaterNode : ExpressionNode
                     rightVal = convertedIdent;
                 }
 
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "icmp ogt double", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "fcmp ogt double", leftVal, rightVal);
                 break;
             default:
                 break;
@@ -2125,13 +2124,37 @@ public class LogicalAndNode : ExpressionNode
         leftExpression.CheckType();
         rightExpression.CheckType();
 
+        string outputVal = Compiler.NewValueIdent();
+        string outputIdent = Compiler.newPtrIdent();
+
+        string temp1 = Compiler.NewValueIdent();
+        string temp2 = Compiler.NewValueIdent();
+
+        int curCondIndex = Compiler.compilerCondIndex++;
+        string outputIsFalseLabel = "outputIsFalseLabel" + curCondIndex;
+        string checkRExp = "checkRExp" + curCondIndex;
+        string endComparison = "endComparison" + curCondIndex;
+
         string leftVal = leftExpression.GenCode();
+        string leftValBool = Compiler.NewValueIdent();
+
+
+        Compiler.EmitCode($"{outputIdent} = alloca i1");
+        Compiler.EmitCode($"{leftValBool} = icmp eq i1 1, {leftVal}");
+        Compiler.EmitCode($"br i1 {leftValBool}, label %{checkRExp}, label %{outputIsFalseLabel}");
+        Compiler.EmitCode($"{checkRExp}:");
         string rightVal = rightExpression.GenCode();
+        Compiler.EmitCode($"{temp1} = and i1 {leftVal}, {rightVal}");
+        Compiler.EmitCode($"store i1 {temp1}, i1* {outputIdent}");
+        Compiler.EmitCode($"br label %{endComparison}");
+        Compiler.EmitCode($"{outputIsFalseLabel}:");
+        Compiler.EmitCode($"{temp2} = icmp eq i1 1, {leftVal}");
+        Compiler.EmitCode($"store i1 {temp2}, i1* {outputIdent}");
+        Compiler.EmitCode($"br label %{endComparison}");
+        Compiler.EmitCode($"{endComparison}:");
+        Compiler.EmitCode($"{outputVal} = load i1, i1* {outputIdent}");
 
-        string tempIdent = Compiler.NewValueIdent();
-        Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "and i1", leftVal, rightVal);
-
-        return tempIdent;
+        return outputVal;
     }
 }
 
@@ -2167,14 +2190,35 @@ public class LogicalOrNode : ExpressionNode
         leftExpression.CheckType();
         rightExpression.CheckType();
 
+        string outputVal = Compiler.NewValueIdent();
+        string outputIdent = Compiler.newPtrIdent();
+
+        string temp1 = Compiler.NewValueIdent();
+        string temp2 = Compiler.NewValueIdent();
+
+        int curCondIndex = Compiler.compilerCondIndex++;
+        string outputIsTrueLabel = "outputIsFalseLabel" + curCondIndex;
+        string checkRExp = "checkRExp" + curCondIndex;
+        string endComparison = "endComparison" + curCondIndex;
+
         string leftVal = leftExpression.GenCode();
+        string leftValBool = Compiler.NewValueIdent();
+
+        Compiler.EmitCode($"{outputIdent} = alloca i1");
+        Compiler.EmitCode($"{leftValBool} = icmp eq i1 1, {leftVal}");
+        Compiler.EmitCode($"br i1 {leftValBool}, label %{outputIsTrueLabel}, label %{checkRExp}");
+        Compiler.EmitCode($"{checkRExp}:");
         string rightVal = rightExpression.GenCode();
-
-        string tempIdent = Compiler.NewValueIdent();
-
-        Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "or i1", leftVal, rightVal);
-
-        return tempIdent;
+        Compiler.EmitCode($"{temp1} = or i1 {leftVal}, {rightVal}");
+        Compiler.EmitCode($"store i1 {temp1}, i1* {outputIdent}");
+        Compiler.EmitCode($"br label %{endComparison}");
+        Compiler.EmitCode($"{outputIsTrueLabel}:");
+        Compiler.EmitCode($"{temp2} = icmp eq i1 1, {leftVal}");
+        Compiler.EmitCode($"store i1 {temp2}, i1* {outputIdent}");
+        Compiler.EmitCode($"br label %{endComparison}");
+        Compiler.EmitCode($"{endComparison}:");
+        Compiler.EmitCode($"{outputVal} = load i1, i1* {outputIdent}");
+        return outputVal;
     }
 }
 class ErrorException : ApplicationException

@@ -1,15 +1,6 @@
 %using QUT.Gppg;
 %namespace GardensPoint
 
-%{
-    public override void yyerror(string erMsg, params object[] args)
-    {
-        Console.WriteLine(erMsg);
-        Console.WriteLine("SYNTAX ERROR LINE:" + Compiler.lineno);
-        Compiler.syntaxErrors++;
-    }
-%}
-
 IntNumber     (0|[1-9][0-9]*)
 HexIntNumber  (0(x|X)([a-f0-9]+))
 RealNumber    (0|[1-9][0-9]*)\.[0-9]+
@@ -58,6 +49,7 @@ Str        \"(\\.|[^"\n\\])*\"
 ";"             { return (int)Tokens.Semicolon; }
 
 "\r\n"			{ Compiler.lineno++; }
+"\n"			{ Compiler.lineno++; }
 "\r"            { }
 "\t"            { }
 " "             { }
@@ -69,5 +61,4 @@ Str        \"(\\.|[^"\n\\])*\"
 {Ident}       	    { yylval.value=yytext; return (int)Tokens.Ident; }
 {Str}				{ yylval.value=yytext; return (int)Tokens.Str; }
 {Comment}		    { Compiler.lineno++; }
-
-.					{ yyerror(""); return (int)Tokens.error; }
+.					{ return (int)Tokens.Error; }
