@@ -17,7 +17,7 @@ public SyntaxTreeNode             STMTnode;
 
 %%
 
-START:          Program BLOCK
+START:          Program BLOCK Eof
                 {
                     Compiler.rootNode = $2;
                 }
@@ -42,11 +42,21 @@ BLOCK:          LeftCurlyBracket DECL_LIST STMT_LIST RightCurlyBracket
                 {
                     $$ = new StatementNode($2, $3); 
                 }
+|               LeftCurlyBracket DECL_LIST STMT_LIST Eof
+                {
+                    Console.WriteLine("SYNTAX ERROR. LINE: " + Compiler.lineno);
+                    Compiler.errors++;
+                }
 ;
 
 BLOCK_INSTRUCTION:  LeftCurlyBracket STMT_LIST RightCurlyBracket
                     {
                     $$ = $2;
+                    }
+|                   LeftCurlyBracket STMT_LIST Eof
+                    {
+                        Console.WriteLine("SYNTAX ERROR. LINE: " + Compiler.lineno);
+                        Compiler.errors++;
                     }
 ;
 

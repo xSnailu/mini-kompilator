@@ -150,8 +150,8 @@ public class Compiler
         {
             string strName = stringGlobalVariableById(i);
             string str = Strings[i];
-            int endlCount = Regex.Matches(str, @"\\0A").Count;
-            EmitCode($"{strName} = constant [{str.Length + 1 - endlCount * 2} x i8] c\"{str}\\00\"");
+            int specialCharCount = Regex.Matches(str, @"\\[0-9 A-Z][0-9 A-F]").Count;
+            EmitCode($"{strName} = constant [{str.Length + 1 - specialCharCount * 2} x i8] c\"{str}\\00\"");
         }
         EmitCode("@int_res = constant [3 x i8] c\"%d\\00\"");
         EmitCode("@double_res = constant [4 x i8] c\"%lf\\00\"");
@@ -525,7 +525,9 @@ public class WriteStringNode : SyntaxTreeNode
         this.line = Compiler.lineno;
         String str = s.Substring(1, s.Length - 2); // usuniecie " z konca i poczatku
         str = str.Replace("\\n", "\\0A"); // zamiana \n na \\0A <=> przejscie do nowej linii
-        
+        str = str.Replace("\\\"", "\\22"); // zamiana \" na \\22
+        str = str.Replace("\\\\", "\\");
+
         Compiler.Strings.Add(str); 
         stringId = Compiler.Strings.Count - 1;
         this.type = CompilerType.Void_Type;
@@ -540,8 +542,8 @@ public class WriteStringNode : SyntaxTreeNode
     {
         string str = Compiler.Strings[stringId];
         string name = Compiler.stringGlobalVariableById(stringId);
-        int endlCount = Regex.Matches(str, @"\\0A").Count;
-        Compiler.EmitCode($"call i32 (i8*, ...) @printf(i8* bitcast ([{str.Length + 1 - endlCount * 2} x i8]* {name} to i8*))");
+        int specialCharCount = Regex.Matches(str, @"\\[0-9 A-Z][0-9 A-F]").Count;
+        Compiler.EmitCode($"call i32 (i8*, ...) @printf(i8* bitcast ([{str.Length + 1 - specialCharCount * 2} x i8]* {name} to i8*))");
         return null;
     }
 }
