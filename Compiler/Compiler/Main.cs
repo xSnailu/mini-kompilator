@@ -21,6 +21,8 @@ public class Compiler
     public static Dictionary<string, CompilerType> Variables = new Dictionary<string, CompilerType>();
     public static List<string> Strings = new List<string>();
 
+    public static List<string> LogicalOperationsIdents = new List<string>();
+
     public static int compilerCondIndex = 0;
     public static void SetRoot(SyntaxTreeNode root)
     {
@@ -165,6 +167,11 @@ public class Compiler
         EmitCode("declare i32 @scanf(i8*, ...)");
         EmitCode("define i32 @main()");
         EmitCode("{");
+        foreach(var logOpIdent in LogicalOperationsIdents)
+        {
+            EmitCode($"{logOpIdent} = alloca i1");
+        }
+        
     }
 
     private static void GenEpilog()
@@ -219,9 +226,15 @@ public class Compiler
         return string.Format($"%ptr_temp{++tempPtrIndex}");
     }
 
+    public static int logicalPtrIndex = 0;
+    public static string newLogicalPtrIdent()
+    {
+        return string.Format($"%ptr_temp_logical_op{++tempPtrIndex}");
+    }
+
     public static string stringGlobalVariableById(int id)
     {
-        return string.Format($"@globalString{id}");
+        return string.Format($"@globalString{++id}");
     }
 
 }
@@ -395,8 +408,8 @@ public class IfNode : SyntaxTreeNode
     public override CompilerType CheckType()
     {
         statement.CheckType();
-        CompilerType typeToCheck = condition.type;
-        if(typeToCheck != CompilerType.Bool_Type)
+        CompilerType typeToCheck = condition.CheckType();
+        if (typeToCheck != CompilerType.Bool_Type)
         {
             throw new ErrorException($"Wrong argument in if condition at line: {this.line}. Expected bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
         }
@@ -488,7 +501,7 @@ public class WhileNode : SyntaxTreeNode
 
     public override CompilerType CheckType()
     {
-        CompilerType typeToCheck = condition.type;
+        CompilerType typeToCheck = condition.CheckType();
         if (typeToCheck != CompilerType.Bool_Type)
         {
             throw new ErrorException($"Wrong argument in while condition at line: {this.line}. Expected bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
@@ -523,10 +536,46 @@ public class WriteStringNode : SyntaxTreeNode
     public WriteStringNode(string s)
     {
         this.line = Compiler.lineno;
-        String str = s.Substring(1, s.Length - 2); // usuniecie " z konca i poczatku
-        str = str.Replace("\\n", "\\0A"); // zamiana \n na \\0A <=> przejscie do nowej linii
-        str = str.Replace("\\\"", "\\22"); // zamiana \" na \\22
-        str = str.Replace("\\\\", "\\");
+        String str = s.Substring(1, s.Length - 2); // usuniecie " z konca i poczatku stringa
+
+        // Specjalne znaczenie mają jedynie sekwencje
+        // \n -     nowa linia
+        // \"    -  wypisanie "
+        // \\    -  wypisanie \
+
+
+        // W pozostałych sytuacjach znak \ jest ignorowany
+
+        try
+        {
+            for (int i = 0; i + 1 < str.Length; i++)
+            {
+                if (str.Substring(i, 1) == "\\")
+                {
+                    var sub = str.Substring(i, 2);
+                    if (str.Substring(i, 2) == "\\n" ||
+                        str.Substring(i, 2) == "\\\"" ||
+                        str.Substring(i, 2) == "\\\\")
+                    {
+                        i += 1;
+                    }
+                    else
+                    {
+                        str = str.Substring(0, i) + str.Substring(i + 1, str.Length - (i + 1));
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"Problem with interpreting string: {0}", s);
+        }
+
+        str = str.Replace("\\n",  "\\0A");   // \n    -     nowa linia
+        str = str.Replace("\\\"", "\\22");   // \"     -     wypisanie "
+        str = str.Replace("\\\\", "\\5C");   // \\     -     wypisanie \
+
+        
 
         Compiler.Strings.Add(str); 
         stringId = Compiler.Strings.Count - 1;
@@ -653,6 +702,11 @@ public class ReadNode : SyntaxTreeNode
 
     public override CompilerType CheckType()
     {
+        if(!Compiler.Variables.ContainsKey(ident))
+        {
+            throw new ErrorException($"Read try read to undeclared ident: {this.ident}. LINE: {this.line}.");
+        }
+
         CompilerType typeToCheck = Compiler.Variables[ident];
         if (typeToCheck != CompilerType.Int_Type && typeToCheck != CompilerType.Double_type)
         {
@@ -703,6 +757,11 @@ public class ReadHexNode : SyntaxTreeNode
 
     public override CompilerType CheckType()
     {
+        if (!Compiler.Variables.ContainsKey(ident))
+        {
+            throw new ErrorException($"Read try read to undeclared ident: {this.ident}. LINE: {this.line}.");
+        }
+
         CompilerType typeToCheck = Compiler.Variables[ident];
         if (typeToCheck != CompilerType.Int_Type)
         {
@@ -941,7 +1000,7 @@ public class ConvertToNode : ExpressionNode
                 }
                 break;
             case CompilerType.Double_type:
-                if (typeToCheck != CompilerType.Int_Type && typeToCheck != CompilerType.Double_type && typeToCheck != CompilerType.Bool_Type)
+                if (typeToCheck != CompilerType.Int_Type && typeToCheck != CompilerType.Double_type)
                 {
                     throw new ErrorException($"Wrong argument in convert to double at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(typeToCheck)}.");
                 }
@@ -2098,6 +2157,7 @@ public class LogicalAndNode : ExpressionNode
 {
     ExpressionNode leftExpression;
     ExpressionNode rightExpression;
+    string logicalOpPtr;
 
     public LogicalAndNode(ExpressionNode lE, ExpressionNode rE)
     {
@@ -2106,6 +2166,9 @@ public class LogicalAndNode : ExpressionNode
         rightExpression = rE;
 
         this.type = CompilerType.Bool_Type;
+
+        logicalOpPtr = Compiler.newLogicalPtrIdent();
+        Compiler.LogicalOperationsIdents.Add(logicalOpPtr);
     }
 
     public override CompilerType CheckType()
@@ -2136,25 +2199,23 @@ public class LogicalAndNode : ExpressionNode
         string outputIsFalseLabel = "outputIsFalseLabel" + curCondIndex;
         string checkRExp = "checkRExp" + curCondIndex;
         string endComparison = "endComparison" + curCondIndex;
-
-        string leftVal = leftExpression.GenCode();
         string leftValBool = Compiler.NewValueIdent();
 
 
-        Compiler.EmitCode($"{outputIdent} = alloca i1");
+        string leftVal = leftExpression.GenCode();
         Compiler.EmitCode($"{leftValBool} = icmp eq i1 1, {leftVal}");
         Compiler.EmitCode($"br i1 {leftValBool}, label %{checkRExp}, label %{outputIsFalseLabel}");
         Compiler.EmitCode($"{checkRExp}:");
         string rightVal = rightExpression.GenCode();
         Compiler.EmitCode($"{temp1} = and i1 {leftVal}, {rightVal}");
-        Compiler.EmitCode($"store i1 {temp1}, i1* {outputIdent}");
+        Compiler.EmitCode($"store i1 {temp1}, i1* {logicalOpPtr}");
         Compiler.EmitCode($"br label %{endComparison}");
         Compiler.EmitCode($"{outputIsFalseLabel}:");
         Compiler.EmitCode($"{temp2} = icmp eq i1 1, {leftVal}");
-        Compiler.EmitCode($"store i1 {temp2}, i1* {outputIdent}");
+        Compiler.EmitCode($"store i1 {temp2}, i1* {logicalOpPtr}");
         Compiler.EmitCode($"br label %{endComparison}");
         Compiler.EmitCode($"{endComparison}:");
-        Compiler.EmitCode($"{outputVal} = load i1, i1* {outputIdent}");
+        Compiler.EmitCode($"{outputVal} = load i1, i1* {logicalOpPtr}");
 
         return outputVal;
     }
@@ -2164,6 +2225,7 @@ public class LogicalOrNode : ExpressionNode
 {
     ExpressionNode leftExpression;
     ExpressionNode rightExpression;
+    string logicalOpPtr;
 
     public LogicalOrNode(ExpressionNode lE, ExpressionNode rE)
     {
@@ -2172,6 +2234,9 @@ public class LogicalOrNode : ExpressionNode
         rightExpression = rE;
 
         this.type = CompilerType.Bool_Type;
+
+        logicalOpPtr = Compiler.newLogicalPtrIdent();
+        Compiler.LogicalOperationsIdents.Add(logicalOpPtr);
     }
 
     public override CompilerType CheckType()
@@ -2202,24 +2267,22 @@ public class LogicalOrNode : ExpressionNode
         string outputIsTrueLabel = "outputIsFalseLabel" + curCondIndex;
         string checkRExp = "checkRExp" + curCondIndex;
         string endComparison = "endComparison" + curCondIndex;
-
-        string leftVal = leftExpression.GenCode();
         string leftValBool = Compiler.NewValueIdent();
 
-        Compiler.EmitCode($"{outputIdent} = alloca i1");
+        string leftVal = leftExpression.GenCode();
         Compiler.EmitCode($"{leftValBool} = icmp eq i1 1, {leftVal}");
         Compiler.EmitCode($"br i1 {leftValBool}, label %{outputIsTrueLabel}, label %{checkRExp}");
         Compiler.EmitCode($"{checkRExp}:");
         string rightVal = rightExpression.GenCode();
         Compiler.EmitCode($"{temp1} = or i1 {leftVal}, {rightVal}");
-        Compiler.EmitCode($"store i1 {temp1}, i1* {outputIdent}");
+        Compiler.EmitCode($"store i1 {temp1}, i1* {logicalOpPtr}");
         Compiler.EmitCode($"br label %{endComparison}");
         Compiler.EmitCode($"{outputIsTrueLabel}:");
         Compiler.EmitCode($"{temp2} = icmp eq i1 1, {leftVal}");
-        Compiler.EmitCode($"store i1 {temp2}, i1* {outputIdent}");
+        Compiler.EmitCode($"store i1 {temp2}, i1* {logicalOpPtr}");
         Compiler.EmitCode($"br label %{endComparison}");
         Compiler.EmitCode($"{endComparison}:");
-        Compiler.EmitCode($"{outputVal} = load i1, i1* {outputIdent}");
+        Compiler.EmitCode($"{outputVal} = load i1, i1* {logicalOpPtr}");
         return outputVal;
     }
 }
