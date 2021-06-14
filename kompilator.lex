@@ -56,7 +56,7 @@ Str        \"(\\.|[^"\n\\])*\"
 <<EOF>>       	{ return (int)Tokens.Eof; }
 
 {IntNumber}   	    { yylval.value=yytext; return (int)Tokens.IntNumber; }
-{HexIntNumber}   	{ yylval.value=yytext; return (int)Tokens.IntNumber; }
+{HexIntNumber}   	{ yylval.value=yytext; return (int)Tokens.HexIntNumber; }
 {RealNumber}		{ yylval.value=yytext; return (int)Tokens.RealNumber; }
 {Ident}       	    { yylval.value=yytext; return (int)Tokens.Ident; }
 {Str}				{ yylval.value=yytext; return (int)Tokens.Str; }

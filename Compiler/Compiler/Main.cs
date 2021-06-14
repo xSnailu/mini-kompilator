@@ -70,7 +70,7 @@ public class Compiler
         {
             parser.Parse();
         }
-        catch (ErrorException e)
+        catch (CompilerException e)
         {
             Console.WriteLine(e.Message);
             return 1;
@@ -93,7 +93,7 @@ public class Compiler
         {
             rootNode.CheckType();
         }
-        catch (ErrorException e)
+        catch (CompilerException e)
         {
             Console.WriteLine(e.Message);
             return 1;
@@ -115,7 +115,7 @@ public class Compiler
                 GenCode();
             }
         }
-        catch (ErrorException e)
+        catch (CompilerException e)
         {
             Console.WriteLine("UNEXPECTED ERROR");
             Console.WriteLine(e.Message);
@@ -237,6 +237,10 @@ public class Compiler
         return string.Format($"@globalString{++id}");
     }
 
+    public static void addNewError(string errorMsg)
+    {
+        throw new CompilerException(errorMsg);
+    }
 }
 
 
@@ -351,7 +355,7 @@ public class DeclarationNode : SyntaxTreeNode
 
         if (Compiler.Variables.ContainsKey(ident))
         {
-            throw new ErrorException($"Variable {ident} already declared. Line: {this.line}");
+            Compiler.addNewError($"Variable {ident} already declared. Line: {this.line}");
         }
         Compiler.Variables.Add(ident, this.type);
     }
@@ -411,7 +415,7 @@ public class IfNode : SyntaxTreeNode
         CompilerType typeToCheck = condition.CheckType();
         if (typeToCheck != CompilerType.Bool_Type)
         {
-            throw new ErrorException($"Wrong argument in if condition at line: {this.line}. Expected bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
+            Compiler.addNewError($"Wrong argument in if condition at line: {this.line}. Expected bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
         }
 
         return CompilerType.Void_Type;
@@ -457,7 +461,7 @@ public class IfElseNode : SyntaxTreeNode
         CompilerType typeToCheck = condition.CheckType();
         if (typeToCheck != CompilerType.Bool_Type)
         {
-            throw new ErrorException($"Wrong argument in ifelse condition at line: {this.line}. Expected bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
+            Compiler.addNewError($"Wrong argument in ifelse condition at line: {this.line}. Expected bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
         }
 
         return CompilerType.Void_Type;
@@ -504,7 +508,7 @@ public class WhileNode : SyntaxTreeNode
         CompilerType typeToCheck = condition.CheckType();
         if (typeToCheck != CompilerType.Bool_Type)
         {
-            throw new ErrorException($"Wrong argument in while condition at line: {this.line}. Expected bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
+            Compiler.addNewError($"Wrong argument in while condition at line: {this.line}. Expected bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
         }
 
         return CompilerType.Void_Type;
@@ -612,7 +616,7 @@ public class WriteHexExpressionNode : SyntaxTreeNode
         CompilerType typeToCheck = expression.CheckType();
         if (typeToCheck != CompilerType.Int_Type)
         {
-            throw new ErrorException($"Wrong argument in hexadecimal write at line: {this.line}. Expected int - got {Compiler.compilerTypeToString(typeToCheck)}.");
+            Compiler.addNewError($"Wrong argument in hexadecimal write at line: {this.line}. Expected int - got {Compiler.compilerTypeToString(typeToCheck)}.");
         }
 
         return this.type;
@@ -642,7 +646,7 @@ public class WriteExpressionNode : SyntaxTreeNode
         CompilerType typeToCheck = expression.CheckType();
         if (typeToCheck != CompilerType.Int_Type && typeToCheck != CompilerType.Double_type && typeToCheck != CompilerType.Bool_Type)
         {
-            throw new ErrorException($"Wrong argument in write at line: {this.line}. Expected int, double or bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
+            Compiler.addNewError($"Wrong argument in write at line: {this.line}. Expected int, double or bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
         }
 
         return this.type;
@@ -704,13 +708,13 @@ public class ReadNode : SyntaxTreeNode
     {
         if(!Compiler.Variables.ContainsKey(ident))
         {
-            throw new ErrorException($"Read try read to undeclared ident: {this.ident}. LINE: {this.line}.");
+            Compiler.addNewError($"Read try read to undeclared ident: {this.ident}. LINE: {this.line}.");
         }
 
         CompilerType typeToCheck = Compiler.Variables[ident];
         if (typeToCheck != CompilerType.Int_Type && typeToCheck != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in read at line: {this.line}. Expected int, double - got {Compiler.compilerTypeToString(typeToCheck)}.");
+            Compiler.addNewError($"Wrong argument in read at line: {this.line}. Expected int, double - got {Compiler.compilerTypeToString(typeToCheck)}.");
         }
 
         return this.type;
@@ -719,22 +723,14 @@ public class ReadNode : SyntaxTreeNode
     public override string GenCode()
     {
         this.type = Compiler.Variables[ident];
-        string tempIdent = Compiler.NewValueIdent();
-        string bufIdent = Compiler.NewValueIdent();
         switch (this.type)
         {
             // Uwzględniona konwersja int -> double albo odwrotnie
             case CompilerType.Int_Type:
-                Compiler.EmitCode($"{tempIdent} = alloca i32");
-                Compiler.EmitCode($"call i32 (i8*, ...) @scanf(i8* bitcast ([3 x i8]* @read_int to i8*), i32* {tempIdent})");
-                Compiler.EmitCode($"{bufIdent} = load i32, i32* {tempIdent}");
-                Compiler.EmitCode($"store i32 {bufIdent}, i32* %{ident}");
+                Compiler.EmitCode($"call i32 (i8*, ...) @scanf(i8* bitcast ([3 x i8]* @read_int to i8*), i32* %{ident})");
                 break;
             case CompilerType.Double_type:
-                Compiler.EmitCode($"{tempIdent} = alloca double");
-                Compiler.EmitCode($"call i32 (i8*, ...) @scanf(i8* bitcast ([4 x i8]* @read_double to i8*), double* {tempIdent})");
-                Compiler.EmitCode($"{bufIdent} = load double, double* {tempIdent}");
-                Compiler.EmitCode($"store double {bufIdent}, double* %{ident}");
+                Compiler.EmitCode($"call i32 (i8*, ...) @scanf(i8* bitcast ([4 x i8]* @read_double to i8*), double* %{ident})");
                 break;
             default:
                 break;
@@ -759,13 +755,13 @@ public class ReadHexNode : SyntaxTreeNode
     {
         if (!Compiler.Variables.ContainsKey(ident))
         {
-            throw new ErrorException($"Read try read to undeclared ident: {this.ident}. LINE: {this.line}.");
+            Compiler.addNewError($"Read try read to undeclared ident: {this.ident}. LINE: {this.line}.");
         }
 
         CompilerType typeToCheck = Compiler.Variables[ident];
         if (typeToCheck != CompilerType.Int_Type)
         {
-            throw new ErrorException($"Wrong argument in hexadecimal read at line: {this.line}. Expected int - got {Compiler.compilerTypeToString(typeToCheck)}.");
+            Compiler.addNewError($"Wrong argument in hexadecimal read at line: {this.line}. Expected int - got {Compiler.compilerTypeToString(typeToCheck)}.");
         }
 
         return this.type;
@@ -774,12 +770,7 @@ public class ReadHexNode : SyntaxTreeNode
     public override string GenCode()
     {
         this.type = Compiler.Variables[ident];
-        string tempIdent = Compiler.NewValueIdent();
-        string bufIdent = Compiler.NewValueIdent();
-        Compiler.EmitCode($"{tempIdent} = alloca i32");
-        Compiler.EmitCode($"call i32 (i8*, ...) @scanf(i8* bitcast ([3 x i8]* @read_hex to i8*), i32* {tempIdent})");
-        Compiler.EmitCode($"{bufIdent} = load i32, i32* {tempIdent}");
-        Compiler.EmitCode($"store i32 {bufIdent}, i32* %{ident}");
+        Compiler.EmitCode($"call i32 (i8*, ...) @scanf(i8* bitcast ([3 x i8]* @read_hex to i8*), i32* %{ident})");
         return null;
     }
 }
@@ -814,7 +805,7 @@ public class AssignNode : ExpressionNode
 
         if (!Compiler.Variables.ContainsKey(ident))
         {
-            throw new ErrorException($"Can't assign to undeclared ident: {ident}. Line: {this.line}.");
+            Compiler.addNewError($"Can't assign to undeclared ident: {ident}. Line: {this.line}.");
         }
 
         this.type = Compiler.Variables[ident];
@@ -828,7 +819,7 @@ public class AssignNode : ExpressionNode
         {
             if (expType != CompilerType.Int_Type)
             {
-                throw new ErrorException($"Wrong argument in assign at line: {this.line}. Expected int - got {Compiler.compilerTypeToString(expType)}.");
+                Compiler.addNewError($"Wrong argument in assign at line: {this.line}. Expected int - got {Compiler.compilerTypeToString(expType)}.");
             }
         }
 
@@ -836,7 +827,7 @@ public class AssignNode : ExpressionNode
         {
             if (expType != CompilerType.Int_Type && expType != CompilerType.Double_type)
             {
-                throw new ErrorException($"Wrong argument in assign at line: {this.line}. Expected int, double - got {Compiler.compilerTypeToString(expType)}.");
+                Compiler.addNewError($"Wrong argument in assign at line: {this.line}. Expected int, double - got {Compiler.compilerTypeToString(expType)}.");
             }
         }
 
@@ -844,7 +835,7 @@ public class AssignNode : ExpressionNode
         {
             if (expType != CompilerType.Bool_Type)
             {
-                throw new ErrorException($"Wrong argument in assign at line: {this.line}. Expected bool - got {Compiler.compilerTypeToString(expType)}.");
+                Compiler.addNewError($"Wrong argument in assign at line: {this.line}. Expected bool - got {Compiler.compilerTypeToString(expType)}.");
             }
         }
 
@@ -918,6 +909,7 @@ public class ValueNode : ExpressionNode
                 break;
             case CompilerType.Hex_Type:
                 this.value = Convert.ToInt32(this.value, 16).ToString();
+                this.type = CompilerType.Int_Type;
                 break;
             case CompilerType.Void_Type:
                 break;
@@ -947,7 +939,7 @@ public class IdentNode : ExpressionNode
         ident = i;
         if (!Compiler.Variables.ContainsKey(ident))
         {
-            throw new ErrorException($"{ident} variable undeclared. Line: {this.line}.");
+            Compiler.addNewError($"{ident} variable undeclared. Line: {this.line}.");
         }
         this.type = Compiler.Variables[ident];
     }
@@ -996,13 +988,13 @@ public class ConvertToNode : ExpressionNode
             case CompilerType.Int_Type:
                 if (typeToCheck != CompilerType.Int_Type && typeToCheck != CompilerType.Double_type && typeToCheck != CompilerType.Bool_Type)
                 {
-                    throw new ErrorException($"Wrong argument in convert to int at line: {this.line}. Expected int, double or bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
+                    Compiler.addNewError($"Wrong argument in convert to int at line: {this.line}. Expected int, double or bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
                 }
                 break;
             case CompilerType.Double_type:
                 if (typeToCheck != CompilerType.Int_Type && typeToCheck != CompilerType.Double_type)
                 {
-                    throw new ErrorException($"Wrong argument in convert to double at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(typeToCheck)}.");
+                    Compiler.addNewError($"Wrong argument in convert to double at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(typeToCheck)}.");
                 }
                 break;
         }
@@ -1078,7 +1070,7 @@ public class BitwiseNegationNode : ExpressionNode
         CompilerType typeToCheck = expression.CheckType();
         if (typeToCheck != CompilerType.Int_Type)
         {
-            throw new ErrorException($"Wrong argument in bitwise negation at line: {this.line}. Expected int - got {Compiler.compilerTypeToString(typeToCheck)}.");
+            Compiler.addNewError($"Wrong argument in bitwise negation at line: {this.line}. Expected int - got {Compiler.compilerTypeToString(typeToCheck)}.");
         }
 
         return this.type;
@@ -1108,7 +1100,7 @@ public class LogicalNegationNode : ExpressionNode
         CompilerType typeToCheck = expression.CheckType();
         if (typeToCheck != CompilerType.Bool_Type)
         {
-            throw new ErrorException($"Wrong argument in bitwise negation at line: {this.line}. Expected bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
+            Compiler.addNewError($"Wrong argument in bitwise negation at line: {this.line}. Expected bool - got {Compiler.compilerTypeToString(typeToCheck)}.");
         }
 
         return this.type;
@@ -1137,7 +1129,7 @@ public class UnaryMinusNode : ExpressionNode
         CompilerType typeToCheck = expression.CheckType();
         if (typeToCheck != CompilerType.Int_Type && typeToCheck != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in bitwise negation at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(typeToCheck)}.");
+            Compiler.addNewError($"Wrong argument in bitwise negation at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(typeToCheck)}.");
         }
 
         return this.type;   
@@ -1188,7 +1180,7 @@ public class BitwiseOrNode : ExpressionNode
 
         if(leftType != CompilerType.Int_Type || rightType != CompilerType.Int_Type)
         {
-            throw new ErrorException($"Wrong argument in bitwise or at line: {this.line}. Expected int - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in bitwise or at line: {this.line}. Expected int - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         return this.type;
@@ -1226,7 +1218,7 @@ public class BitwiseAndNode : ExpressionNode
 
         if (leftType != CompilerType.Int_Type || rightType != CompilerType.Int_Type)
         {
-            throw new ErrorException($"Wrong argument in bitwise and at line: {this.line}. Expected int - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in bitwise and at line: {this.line}. Expected int - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         return this.type;
@@ -1277,12 +1269,12 @@ public class MultipliesNode : ExpressionNode
 
         if (leftType != CompilerType.Int_Type && leftType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in multiplies at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in multiplies at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         if (rightType != CompilerType.Int_Type && rightType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in multiplies at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in multiplies at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         return this.type;
@@ -1374,12 +1366,12 @@ public class DivisionNode : ExpressionNode
 
         if (leftType != CompilerType.Int_Type && leftType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in division at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in division at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         if (rightType != CompilerType.Int_Type && rightType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in division at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in division at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         return this.type;
@@ -1471,12 +1463,12 @@ public class PlusNode : ExpressionNode
 
         if (leftType != CompilerType.Int_Type && leftType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in add at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in add at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         if (rightType != CompilerType.Int_Type && rightType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in add at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in add at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         return this.type;
@@ -1566,12 +1558,12 @@ public class MinusNode : ExpressionNode
 
         if (leftType != CompilerType.Int_Type && leftType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in subtract at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in subtract at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         if (rightType != CompilerType.Int_Type && rightType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in subtract at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in subtract at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         return this.type;
@@ -1657,12 +1649,12 @@ public class EqualNode : ExpressionNode
         {
             if (leftType != CompilerType.Int_Type && leftType != CompilerType.Double_type)
             {
-                throw new ErrorException($"Wrong argument in equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+                Compiler.addNewError($"Wrong argument in equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
             }
 
             if (rightType != CompilerType.Int_Type && rightType != CompilerType.Double_type)
             {
-                throw new ErrorException($"Wrong argument in equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+                Compiler.addNewError($"Wrong argument in equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
             }
         }
 
@@ -1753,12 +1745,12 @@ public class UnequalNode : ExpressionNode
         {
             if (leftType != CompilerType.Int_Type && leftType != CompilerType.Double_type)
             {
-                throw new ErrorException($"Wrong argument in equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+                Compiler.addNewError($"Wrong argument in equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
             }
 
             if (rightType != CompilerType.Int_Type && rightType != CompilerType.Double_type)
             {
-                throw new ErrorException($"Wrong argument in equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+                Compiler.addNewError($"Wrong argument in equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
             }
         }
 
@@ -1845,12 +1837,12 @@ public class GreaterNode : ExpressionNode
 
         if (leftType != CompilerType.Int_Type && leftType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in greater at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in greater at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         if (rightType != CompilerType.Int_Type && rightType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in greater at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in greater at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         return this.type;
@@ -1927,12 +1919,12 @@ public class GreaterOrEqualNode : ExpressionNode
 
         if (leftType != CompilerType.Int_Type && leftType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in greater or equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in greater or equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         if (rightType != CompilerType.Int_Type && rightType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in greater or equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in greater or equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         return this.type;
@@ -2009,12 +2001,12 @@ public class LessNode : ExpressionNode
 
         if (leftType != CompilerType.Int_Type && leftType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in less at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in less at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         if (rightType != CompilerType.Int_Type && rightType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in less at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in less at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         return this.type;
@@ -2091,12 +2083,12 @@ public class LessOrEqualNode : ExpressionNode
 
         if (leftType != CompilerType.Int_Type && leftType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in less or equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in less or equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         if (rightType != CompilerType.Int_Type && rightType != CompilerType.Double_type)
         {
-            throw new ErrorException($"Wrong argument in less or equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in less or equal at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         return this.type;
@@ -2178,7 +2170,7 @@ public class LogicalAndNode : ExpressionNode
 
         if (leftType != CompilerType.Bool_Type || rightType != CompilerType.Bool_Type)
         {
-            throw new ErrorException($"Wrong argument in logical and at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in logical and at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         return this.type;
@@ -2246,7 +2238,7 @@ public class LogicalOrNode : ExpressionNode
 
         if (leftType != CompilerType.Bool_Type || rightType != CompilerType.Bool_Type)
         {
-            throw new ErrorException($"Wrong argument in or and at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
+            Compiler.addNewError($"Wrong argument in or and at line: {this.line}. Expected int or double - got {Compiler.compilerTypeToString(leftType)} and {Compiler.compilerTypeToString(rightType)}.");
         }
 
         return this.type;
@@ -2286,8 +2278,8 @@ public class LogicalOrNode : ExpressionNode
         return outputVal;
     }
 }
-class ErrorException : ApplicationException
+class CompilerException : ApplicationException
 {
-    public ErrorException(string msg) : base(msg) { ++Compiler.errors; }
-    
+    public CompilerException(string msg) : base(msg) { ++Compiler.errors; }
 }
+
