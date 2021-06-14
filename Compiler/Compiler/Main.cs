@@ -150,7 +150,7 @@ public class Compiler
         EmitCode("; prolog");
         for(int i = 0; i < Strings.Count; i++)
         {
-            string strName = stringGlobalVariableById(i);
+            string strName = getStringGlobalVariableNameById(i);
             string str = Strings[i];
             int specialCharCount = Regex.Matches(str, @"\\[0-9 A-Z][0-9 A-F]").Count;
             EmitCode($"{strName} = constant [{str.Length + 1 - specialCharCount * 2} x i8] c\"{str}\\00\"");
@@ -217,22 +217,46 @@ public class Compiler
     public static int tempValueIndex = 0;
     public static string NewValueIdent()
     {
-        return string.Format($"%value_temp{++tempValueIndex}");
+        return string.Format($"%TEMP_VAL{++tempValueIndex}");
     }
 
     public static int tempPtrIndex = 0;
     public static string newPtrIdent()
     {
-        return string.Format($"%ptr_temp{++tempPtrIndex}");
+        return string.Format($"%TEMP_PTR{++tempPtrIndex}");
     }
 
     public static int logicalPtrIndex = 0;
     public static string newLogicalPtrIdent()
     {
-        return string.Format($"%ptr_temp_logical_op{++tempPtrIndex}");
+        return string.Format($"%LOGICAL_OP_PTR{++tempPtrIndex}");
     }
 
-    public static string stringGlobalVariableById(int id)
+    public static int trueLabelIndex = 0;
+    public static string newTrueLabel()
+    {
+        return string.Format($"TRUE_LABEL{++trueLabelIndex}");
+    }
+
+    public static int falseLabelIndex = 0;
+    public static string newFalseLabel()
+    {
+        return string.Format($"FALSE_LABEL{++falseLabelIndex}");
+    }
+
+    public static int entryLabelIndex = 0;
+    public static string newEntryLabel()
+    {
+        return string.Format($"ENTRY_LABEL{++entryLabelIndex}");
+    }
+
+    public static int outLabelIndex = 0;
+    public static string newOutLabel()
+    {
+        return string.Format($"OUT_LABEL{++outLabelIndex}");
+    }
+
+    public static string getStringGlobalVariableNameById(int id)
     {
         return string.Format($"@globalString{++id}");
     }
@@ -255,64 +279,67 @@ public abstract class SyntaxTreeNode
 
 public class StatementNode : SyntaxTreeNode
 {
-    List<SyntaxTreeNode> statements;
+    SyntaxTreeNode leftNode;
+    SyntaxTreeNode rightNode;
 
     public StatementNode()
     {
         this.line = Compiler.lineno;
-        statements = new List<SyntaxTreeNode>();
+        this.type = CompilerType.Void_Type;
+
+        leftNode = new EmptyNode();
+        rightNode = new EmptyNode();
     }
-    public StatementNode(SyntaxTreeNode b, SyntaxTreeNode s)
-    {
-        statements = new List<SyntaxTreeNode>();
-        if (b is StatementNode && s is StatementNode)
-        {
-            List<SyntaxTreeNode> s1 = (b as StatementNode).statements;
-            List<SyntaxTreeNode> s2 = (s as StatementNode).statements;
-            statements = new List<SyntaxTreeNode>(s1);
-            statements.AddRange(s2);
-        }
-        else if (b is StatementNode && !(s is StatementNode))
-        {
-            statements = (b as StatementNode).statements;
-            statements.Add(s);
-        }else
-        {
-            statements.Add(b);
-            statements.Add(s);
-        }
+    public StatementNode(SyntaxTreeNode lN, SyntaxTreeNode rN)
+    {  
+        leftNode = lN;
+        rightNode = rN;
     }   
 
     public override CompilerType CheckType()
     {
-        foreach(var s in statements)
+        if(leftNode != null && !(leftNode is EmptyNode))
         {
-            s.CheckType();
+            leftNode.CheckType();
         }
+        
+        if(rightNode != null && !(rightNode is EmptyNode))
+        {
+            rightNode.CheckType();
+        }
+
         return CompilerType.Void_Type;
     }
 
     public override string GenCode()
     {
-        foreach(var s in statements)
+        if (leftNode != null)
         {
-            s.GenCode();
+            leftNode.GenCode();
         }
+
+        if (rightNode != null)
+        {
+            rightNode.GenCode();
+        }
+
         return null;
     }
 }
 
 public class EmptyNode : SyntaxTreeNode
 {
-    public override CompilerType CheckType()
+    public EmptyNode()
     {
         this.line = Compiler.lineno;
+    }
+    public override CompilerType CheckType()
+    {
         return CompilerType.Void_Type;
     }
-
     public override string GenCode()
     {
-        Compiler.EmitCode("%nop = add i1 0, 0");
+        //Compiler.EmitCode("%nop = add i1 0, 0");
         return null;
     }
 }
@@ -330,6 +357,7 @@ public class ExpressionParentNode : SyntaxTreeNode
     {
         this.line = Compiler.lineno;
         expression = e;
+        type = CompilerType.Void_Type;
     }
     public override CompilerType CheckType()
     {
@@ -357,7 +385,10 @@ public class DeclarationNode : SyntaxTreeNode
         {
             Compiler.addNewError($"Variable {ident} already declared. Line: {this.line}");
         }
-        Compiler.Variables.Add(ident, this.type);
+        else
+        {
+            Compiler.Variables.Add(ident, this.type);
+        }
     }
 
     public override CompilerType CheckType()
@@ -367,7 +398,6 @@ public class DeclarationNode : SyntaxTreeNode
 
     public override string GenCode()
     {
-     
         switch (type)
         {
             case CompilerType.Int_Type:
@@ -423,18 +453,18 @@ public class IfNode : SyntaxTreeNode
 
     public override string GenCode()
     {
-        int curCondIndex = Compiler.compilerCondIndex++;
-        string entryLabel = "entry" + curCondIndex;
-        string condTrueLabel = "cond_true" + curCondIndex;
-        string condNextLabel = "cond_next" + curCondIndex;
+        string entryLabel = Compiler.newEntryLabel();
+        string condTrueLabel = Compiler.newTrueLabel();
+        string condFalseLabel = Compiler.newFalseLabel();
+
         Compiler.EmitCode($"br label %{entryLabel}");
         Compiler.EmitCode($"{entryLabel}:");
         string condIndent = condition.GenCode();
-        Compiler.EmitCode($"br i1 {condIndent}, label %{condTrueLabel}, label %{condNextLabel}");
+        Compiler.EmitCode($"br i1 {condIndent}, label %{condTrueLabel}, label %{condFalseLabel}");
         Compiler.EmitCode($"{condTrueLabel}:");
         statement.GenCode();
-        Compiler.EmitCode($"br label %{condNextLabel}");
-        Compiler.EmitCode($"{condNextLabel}:");
+        Compiler.EmitCode($"br label %{condFalseLabel}");
+        Compiler.EmitCode($"{condFalseLabel}:");
         return null;
     }
 }
@@ -469,22 +499,22 @@ public class IfElseNode : SyntaxTreeNode
 
     public override string GenCode()
     {
-        int curCondIndex = Compiler.compilerCondIndex++;
-        string entryLabel = "entry" + curCondIndex;
-        string condTrueLabel = "cond_true" + curCondIndex;
-        string condFalseLabel = "cond_false" + curCondIndex;
-        string condNextLabel = "cond_next" + curCondIndex;
+        string entryLabel = Compiler.newEntryLabel();
+        string condTrueLabel = Compiler.newTrueLabel();
+        string condFalseLabel = Compiler.newFalseLabel();
+        string newOutLabel = Compiler.newOutLabel();
+
         Compiler.EmitCode($"br label %{entryLabel}");
         Compiler.EmitCode($"{entryLabel}:");
         string condIndent = condition.GenCode();
         Compiler.EmitCode($"br i1 {condIndent}, label %{condTrueLabel}, label %{condFalseLabel}");
         Compiler.EmitCode($"{condTrueLabel}:");
         statementT.GenCode();
-        Compiler.EmitCode($"br label %{condNextLabel}");
+        Compiler.EmitCode($"br label %{newOutLabel}");
         Compiler.EmitCode($"{condFalseLabel}:");
         statementF.GenCode();
-        Compiler.EmitCode($"br label %{condNextLabel}");
-        Compiler.EmitCode($"{condNextLabel}:");
+        Compiler.EmitCode($"br label %{newOutLabel}");
+        Compiler.EmitCode($"{newOutLabel}:");
         return null;
     }
 }
@@ -517,17 +547,18 @@ public class WhileNode : SyntaxTreeNode
     public override string GenCode()
     {
         int curCondIndex = Compiler.compilerCondIndex++;
-        string entryLabel = "entry" + curCondIndex;
-        string condTrueLabel = "cond_true" + curCondIndex;
-        string condNextLabel = "cond_next" + curCondIndex;
+        string entryLabel = Compiler.newEntryLabel();
+        string condTrueLabel = Compiler.newTrueLabel();
+        string newOutLabel = Compiler.newOutLabel();
+
         Compiler.EmitCode($"br label %{entryLabel}");
         Compiler.EmitCode($"{entryLabel}:");
         string condIndent = condition.GenCode();
-        Compiler.EmitCode($"br i1 {condIndent}, label %{condTrueLabel}, label %{condNextLabel}");
+        Compiler.EmitCode($"br i1 {condIndent}, label %{condTrueLabel}, label %{newOutLabel}");
         Compiler.EmitCode($"{condTrueLabel}:");
         statement.GenCode();
         Compiler.EmitCode($"br label %{entryLabel}");
-        Compiler.EmitCode($"{condNextLabel}:");
+        Compiler.EmitCode($"{newOutLabel}:");
         return null;
     }
 }
@@ -572,14 +603,12 @@ public class WriteStringNode : SyntaxTreeNode
         }
         catch (Exception e)
         {
-            Console.WriteLine($"Problem with interpreting string: {0}", s);
+            Console.WriteLine($"Problem with parsing string: {0}", s);
         }
 
         str = str.Replace("\\n",  "\\0A");   // \n    -     nowa linia
         str = str.Replace("\\\"", "\\22");   // \"     -     wypisanie "
         str = str.Replace("\\\\", "\\5C");   // \\     -     wypisanie \
-
-        
 
         Compiler.Strings.Add(str); 
         stringId = Compiler.Strings.Count - 1;
@@ -594,7 +623,7 @@ public class WriteStringNode : SyntaxTreeNode
     public override string GenCode()
     {
         string str = Compiler.Strings[stringId];
-        string name = Compiler.stringGlobalVariableById(stringId);
+        string name = Compiler.getStringGlobalVariableNameById(stringId);
         int specialCharCount = Regex.Matches(str, @"\\[0-9 A-Z][0-9 A-F]").Count;
         Compiler.EmitCode($"call i32 (i8*, ...) @printf(i8* bitcast ([{str.Length + 1 - specialCharCount * 2} x i8]* {name} to i8*))");
         return null;
@@ -663,21 +692,21 @@ public class WriteExpressionNode : SyntaxTreeNode
                 break;
             case CompilerType.Bool_Type:
                 int curCondIndex = Compiler.compilerCondIndex++;
-                string entryLabel = "entry" + curCondIndex;
-                string condTrueLabel = "cond_true" + curCondIndex;
-                string condFalseLabel = "cond_false" + curCondIndex;
-                string condNextLabel = "cond_next" + curCondIndex;
+                string entryLabel = Compiler.newEntryLabel();
+                string condTrueLabel = Compiler.newTrueLabel();
+                string condFalseLabel = Compiler.newFalseLabel();
+                string newOutLabel = Compiler.newOutLabel();
                 Compiler.EmitCode($"br label %{entryLabel}");
                 Compiler.EmitCode($"{entryLabel}:");
                 string condIndent = expression.GenCode();
                 Compiler.EmitCode($"br i1 {condIndent}, label %{condTrueLabel}, label %{condFalseLabel}");
                 Compiler.EmitCode($"{condTrueLabel}:");
                 Compiler.EmitCode($"call i32 (i8*, ...) @printf(i8* bitcast ([5 x i8]* @true_res to i8*))");
-                Compiler.EmitCode($"br label %{condNextLabel}");
+                Compiler.EmitCode($"br label %{newOutLabel}");
                 Compiler.EmitCode($"{condFalseLabel}:");
                 Compiler.EmitCode($"call i32 (i8*, ...) @printf(i8* bitcast ([6 x i8]* @false_res to i8*))");
-                Compiler.EmitCode($"br label %{condNextLabel}");
-                Compiler.EmitCode($"{condNextLabel}:");  
+                Compiler.EmitCode($"br label %{newOutLabel}");
+                Compiler.EmitCode($"{newOutLabel}:");  
                 break;
             case CompilerType.Double_type:
                 Compiler.EmitCode($"call i32 (i8*, ...) @printf(i8* bitcast ([4 x i8]* @double_res to i8*), double {v})");
@@ -778,7 +807,10 @@ public class ReadHexNode : SyntaxTreeNode
 // STMT_RETURN
 public class ReturnNode : SyntaxTreeNode
 {
-    public ReturnNode() { this.line = Compiler.lineno; }
+    public ReturnNode()
+    {
+        this.line = Compiler.lineno;
+    }
 
     public override CompilerType CheckType()
     {
@@ -937,9 +969,11 @@ public class IdentNode : ExpressionNode
     {
         this.line = Compiler.lineno;
         ident = i;
+        // Wszystkie zmienne muszą być zadeklarowane, próba użycia niezadeklarowanej zmiennej
+        // powinna powodować błąd kompilacji z komunikatem "undeclared variable"  
         if (!Compiler.Variables.ContainsKey(ident))
         {
-            Compiler.addNewError($"{ident} variable undeclared. Line: {this.line}.");
+            Compiler.addNewError($"An attempt to use undeclared variable {ident}. Line: {this.line}.");
         }
         this.type = Compiler.Variables[ident];
     }
@@ -949,9 +983,7 @@ public class IdentNode : ExpressionNode
     }
 
     public override string GenCode()
-    {
-        // Wszystkie zmienne muszą być zadeklarowane, próba użycia niezadeklarowanej zmiennej
-        // powinna powodować błąd kompilacji z komunikatem "undeclared variable"  
+    {   
         string tempIdent = Compiler.NewValueIdent();
         switch (this.type)
         {
@@ -998,53 +1030,52 @@ public class ConvertToNode : ExpressionNode
                 }
                 break;
         }
-
         return this.type;
     }
 
     public override string GenCode()
     {
         CompilerType expType = expression.CheckType();
-        string curIdent = expression.GenCode();
-        string bufIdent = Compiler.NewValueIdent();
-        string convertedIdent = Compiler.NewValueIdent();
+        string curValue = expression.GenCode();
+        string bufValue = Compiler.NewValueIdent();
+        string convertedValue = Compiler.NewValueIdent();
 
         switch (this.type)
         {
             case CompilerType.Int_Type:
                 if(expType == CompilerType.Int_Type) // nie trzeba konwertowac z int na int
                 {
-                    convertedIdent = curIdent;
+                    convertedValue = curValue;
                     break;
                 }else if(expType == CompilerType.Double_type)
                 {
                     string newIdent = Compiler.NewValueIdent();
                     Compiler.EmitCode($"{newIdent} = alloca double");
-                    Compiler.EmitCode($"store double {curIdent}, double* {newIdent}");
-                    curIdent = newIdent;
+                    Compiler.EmitCode($"store double {curValue}, double* {newIdent}");
+                    curValue = newIdent;
 
-                    Compiler.EmitCode($"{bufIdent} = load double, double* {curIdent}");
-                    Compiler.EmitCode($"{convertedIdent} = fptosi double {bufIdent} to i32");
+                    Compiler.EmitCode($"{bufValue} = load double, double* {curValue}");
+                    Compiler.EmitCode($"{convertedValue} = fptosi double {bufValue} to i32");
                     break;
                 }else // konwersja z boola
                 {
-                    Compiler.EmitCode($"{convertedIdent} = zext i1 {curIdent} to i32 ");
+                    Compiler.EmitCode($"{convertedValue} = zext i1 {curValue} to i32 ");
                     break;
                 }
             case CompilerType.Double_type:
                 if(expType == CompilerType.Double_type) // nie trzeba konwertowac z double na double
                 {
-                    convertedIdent = curIdent;
+                    convertedValue = curValue;
                     break;
                 }else
                 {
                     string newIdent = Compiler.NewValueIdent();
                     Compiler.EmitCode($"{newIdent} = alloca i32");
-                    Compiler.EmitCode($"store i32 {curIdent}, i32* {newIdent}");
-                    curIdent = newIdent;
+                    Compiler.EmitCode($"store i32 {curValue}, i32* {newIdent}");
+                    curValue = newIdent;
 
-                    Compiler.EmitCode($"{bufIdent} = load i32, i32* {curIdent}");
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {bufIdent} to double"); 
+                    Compiler.EmitCode($"{bufValue} = load i32, i32* {curValue}");
+                    Compiler.EmitCode($"{convertedValue} = sitofp i32 {bufValue} to double"); 
                 }
                 break;
             default:
@@ -1052,7 +1083,7 @@ public class ConvertToNode : ExpressionNode
         }
 
 
-        return convertedIdent;
+        return convertedValue;
     }
 }
 
@@ -1079,10 +1110,10 @@ public class BitwiseNegationNode : ExpressionNode
     public override string GenCode()
     {
         expression.CheckType();
-        string curIdent = expression.GenCode();
-        string tempIdent = Compiler.NewValueIdent();
-        Compiler.EmitCode($"{tempIdent} = xor i32 {curIdent}, -1");
-        return tempIdent;
+        string curValue = expression.GenCode();
+        string tempValue = Compiler.NewValueIdent();
+        Compiler.EmitCode($"{tempValue} = xor i32 {curValue}, -1");
+        return tempValue;
     }
 }
 
@@ -1108,10 +1139,10 @@ public class LogicalNegationNode : ExpressionNode
 
     public override string GenCode()
     {
-        string exprIdent = expression.GenCode();
-        string negIdent = Compiler.NewValueIdent();
-        Compiler.EmitCode($"{negIdent} = xor i1 {exprIdent}, -1");
-        return negIdent;
+        string curValue = expression.GenCode();
+        string tempValue = Compiler.NewValueIdent();
+        Compiler.EmitCode($"{tempValue} = xor i1 {curValue}, -1");
+        return tempValue;
     }
 }
 
@@ -1147,7 +1178,7 @@ public class UnaryMinusNode : ExpressionNode
             Compiler.EmitCode($"{secondSubBuf} = sub i32 {firstSubBuf}, {curIdent}");
             return secondSubBuf;
         }
-        else
+        else // wyrazenie typu double
         {
             string curIdent = expression.GenCode();
             string firstSubBuf = Compiler.NewValueIdent();
@@ -1191,10 +1222,10 @@ public class BitwiseOrNode : ExpressionNode
         leftExpression.CheckType();
         rightExpression.CheckType();
 
-        string var1 = leftExpression.GenCode();
-        string var2 = rightExpression.GenCode();
+        string val1 = leftExpression.GenCode();
+        string val2 = rightExpression.GenCode();
         string curTempIdent = Compiler.NewValueIdent();
-        Compiler.EmitCode($"{curTempIdent} = or i32 {var1}, {var2}");
+        Compiler.EmitCode($"{curTempIdent} = or i32 {val1}, {val2}");
         return curTempIdent;
     }
 }
@@ -1229,10 +1260,10 @@ public class BitwiseAndNode : ExpressionNode
         leftExpression.CheckType();
         rightExpression.CheckType();
 
-        string var1 = leftExpression.GenCode();
-        string var2 = rightExpression.GenCode();
+        string val1 = leftExpression.GenCode();
+        string val2 = rightExpression.GenCode();
         string curTempIdent = Compiler.NewValueIdent();
-        Compiler.EmitCode($"{curTempIdent} = and i32 {var1}, {var2}");
+        Compiler.EmitCode($"{curTempIdent} = and i32 {val1}, {val2}");
         return curTempIdent;
     }
 }
@@ -1288,7 +1319,7 @@ public class MultipliesNode : ExpressionNode
         string leftVal = leftExpression.GenCode();
         string rightVal = rightExpression.GenCode();
 
-        string tempIdent = Compiler.NewValueIdent();
+        string tempVal = Compiler.NewValueIdent();
 
         CompilerType relationType;
         if (leftType == CompilerType.Bool_Type && rightType == CompilerType.Bool_Type)
@@ -1308,7 +1339,7 @@ public class MultipliesNode : ExpressionNode
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "mul i32", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "mul i32", leftVal, rightVal);
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
@@ -1325,13 +1356,13 @@ public class MultipliesNode : ExpressionNode
                     rightVal = convertedIdent;
                 }
                 
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "fmul double", leftVal, rightVal);    
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fmul double", leftVal, rightVal);    
                 break;
             default:
                 break;
         }
 
-        return tempIdent;
+        return tempVal;
     }
 }
 
@@ -1385,7 +1416,7 @@ public class DivisionNode : ExpressionNode
         string leftVal = leftExpression.GenCode();
         string rightVal = rightExpression.GenCode();
 
-        string tempIdent = Compiler.NewValueIdent();
+        string tempVal = Compiler.NewValueIdent();
 
         CompilerType relationType;
         if (leftType == CompilerType.Bool_Type && rightType == CompilerType.Bool_Type)
@@ -1404,7 +1435,7 @@ public class DivisionNode : ExpressionNode
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "sdiv i32", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "sdiv i32", leftVal, rightVal);
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
@@ -1421,13 +1452,13 @@ public class DivisionNode : ExpressionNode
                     rightVal = convertedIdent;
                 }
 
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "fdiv double", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fdiv double", leftVal, rightVal);
                 break;
             default:
                 break;
         }
 
-        return tempIdent;
+        return tempVal;
     }
 }
 
@@ -1496,11 +1527,11 @@ public class PlusNode : ExpressionNode
             relationType = CompilerType.Int_Type;
         }
 
-        string tempIdent = Compiler.NewValueIdent();
+        string tempVal = Compiler.NewValueIdent();
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "add i32", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "add i32", leftVal, rightVal);
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
@@ -1517,13 +1548,13 @@ public class PlusNode : ExpressionNode
                     rightVal = convertedIdent;
                 }
 
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "fadd double", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fadd double", leftVal, rightVal);
                 break;
             default:
                 break;
         }
 
-        return tempIdent;
+        return tempVal;
     }
 }
 
@@ -1692,16 +1723,16 @@ public class EqualNode : ExpressionNode
             case CompilerType.Double_type:
                 if(leftType == CompilerType.Int_Type)
                 {
-                    string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {leftVal} to double");
-                    leftVal = convertedIdent;
+                    string convertedVal = Compiler.NewValueIdent();
+                    Compiler.EmitCode($"{convertedVal} = sitofp i32 {leftVal} to double");
+                    leftVal = convertedVal;
                 }
 
                 if(rightType == CompilerType.Int_Type)
                 {
-                    string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {rightVal} to double");
-                    rightVal = convertedIdent;
+                    string convertedVal = Compiler.NewValueIdent();
+                    Compiler.EmitCode($"{convertedVal} = sitofp i32 {rightVal} to double");
+                    rightVal = convertedVal;
                 }
 
                 Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "fcmp oeq double", leftVal, rightVal);
@@ -1765,7 +1796,7 @@ public class UnequalNode : ExpressionNode
         string leftVal = leftExpression.GenCode();
         string rightVal = rightExpression.GenCode();
 
-        string tempIdent = Compiler.NewValueIdent();
+        string tempVal = Compiler.NewValueIdent();
 
         CompilerType relationType;
         if (leftType == CompilerType.Bool_Type && rightType == CompilerType.Bool_Type)
@@ -1786,7 +1817,7 @@ public class UnequalNode : ExpressionNode
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "icmp ne i32", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "icmp ne i32", leftVal, rightVal);
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
@@ -1803,16 +1834,16 @@ public class UnequalNode : ExpressionNode
                     rightVal = convertedIdent;
                 }
 
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "fcmp one double", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fcmp one double", leftVal, rightVal);
                 break;
             case CompilerType.Bool_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "icmp ne i1", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "icmp ne i1", leftVal, rightVal);
                 break;
             default:
                 break;
         }
 
-        return tempIdent;
+        return tempVal;
     }
 }
 
@@ -1856,7 +1887,7 @@ public class GreaterNode : ExpressionNode
         string leftVal = leftExpression.GenCode();
         string rightVal = rightExpression.GenCode();
 
-        string tempIdent = Compiler.NewValueIdent();
+        string tempVal = Compiler.NewValueIdent();
 
         CompilerType relationType;
         if (leftType == CompilerType.Double_type || rightType == CompilerType.Double_type)
@@ -1871,7 +1902,7 @@ public class GreaterNode : ExpressionNode
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "icmp sgt i32", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "icmp sgt i32", leftVal, rightVal);
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
@@ -1888,13 +1919,13 @@ public class GreaterNode : ExpressionNode
                     rightVal = convertedIdent;
                 }
 
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "fcmp ogt double", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fcmp ogt double", leftVal, rightVal);
                 break;
             default:
                 break;
         }
 
-        return tempIdent;
+        return tempVal;
     }
 }
 
@@ -1938,7 +1969,7 @@ public class GreaterOrEqualNode : ExpressionNode
         string leftVal = leftExpression.GenCode();
         string rightVal = rightExpression.GenCode();
 
-        string tempIdent = Compiler.NewValueIdent();
+        string tempVal = Compiler.NewValueIdent();
 
         CompilerType relationType;
         if (leftType == CompilerType.Double_type || rightType == CompilerType.Double_type)
@@ -1953,7 +1984,7 @@ public class GreaterOrEqualNode : ExpressionNode
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "icmp sge i32", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "icmp sge i32", leftVal, rightVal);
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
@@ -1970,13 +2001,13 @@ public class GreaterOrEqualNode : ExpressionNode
                     rightVal = convertedIdent;
                 }
 
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "fcmp oge double", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fcmp oge double", leftVal, rightVal);
                 break;
             default:
                 break;
         }
 
-        return tempIdent;
+        return tempVal;
     }
 }
 
@@ -2020,7 +2051,7 @@ public class LessNode : ExpressionNode
         string leftVal = leftExpression.GenCode();
         string rightVal = rightExpression.GenCode();
 
-        string tempIdent = Compiler.NewValueIdent();
+        string tempVal = Compiler.NewValueIdent();
 
         CompilerType relationType;
         if (leftType == CompilerType.Double_type || rightType == CompilerType.Double_type)
@@ -2035,7 +2066,7 @@ public class LessNode : ExpressionNode
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "icmp slt i32", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "icmp slt i32", leftVal, rightVal);
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
@@ -2052,13 +2083,13 @@ public class LessNode : ExpressionNode
                     rightVal = convertedIdent;
                 }
 
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "fcmp olt double", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fcmp olt double", leftVal, rightVal);
                 break;
             default:
                 break;
         }
 
-        return tempIdent;
+        return tempVal;
     }
 }
 
@@ -2102,7 +2133,7 @@ public class LessOrEqualNode : ExpressionNode
         string leftVal = leftExpression.GenCode();
         string rightVal = rightExpression.GenCode();
 
-        string tempIdent = Compiler.NewValueIdent();
+        string tempVal = Compiler.NewValueIdent();
 
         CompilerType relationType;
         if (leftType == CompilerType.Double_type || rightType == CompilerType.Double_type)
@@ -2117,7 +2148,7 @@ public class LessOrEqualNode : ExpressionNode
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "icmp sle i32", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "icmp sle i32", leftVal, rightVal);
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
@@ -2134,13 +2165,13 @@ public class LessOrEqualNode : ExpressionNode
                     rightVal = convertedIdent;
                 }
 
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "fcmp ole double", leftVal, rightVal);
+                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fcmp ole double", leftVal, rightVal);
                 break;
             default:
                 break;
         }
 
-        return tempIdent;
+        return tempVal;
     }
 }
 
