@@ -2,22 +2,22 @@
 
 %union
 {
-public string                             value;
-public ExpressionNode             EXPnode;
-public SyntaxTreeNode             STMTnode;
+public string                               value;
+public SyntaxTreeExpressionNode             EXPnode;
+public SyntaxTreeNode                       STMTnode;
 }
 
 %token Program If Else While Read Write Return Int Double Bool Hex Eof Error
 %token Assign LogOr LogAnd BitOr BitAnd Equal Unequal Greater GreaterOrEqual Less LessOrEqual Plus Minus Multiplies Division LogNegation BitNegation LeftBracket RightBracket LeftCurlyBracket RightCurlyBracket Comma Semicolon
 
 %token <value>   IntNumber RealNumber Ident Str True False Type HexIntNumber
-%type <EXPnode>  EXPR LOGICAL_EXPR RELATIONAL_EXPR ADDITIVE_EXPR MULTIPLICATIVE_EXPR BITWISE_EXPR UNARY_EXPR
-%type <STMTnode> STMT_LIST STMT BLOCK_INSTRUCTION STMT_RETURN STMT_WRITE STMT_READ STMT_IF STMT_WHILE DECL_COMMA_BOOL DECL_COMMA_INT DECL_COMMA_DOUBLE
-%type <STMTnode> BLOCK DECL_LIST DECL
+%type <EXPnode>  EXPR LOGICAL_EXPR RELATIONAL_EXPR ADDITIVE_EXPR MULTIPLICATIVE_EXPR BITWISE_EXPR UNARY_EXPR TERMINAL
+%type <STMTnode> STMT_LIST STMT CODE_BLOCK STMT_RETURN STMT_WRITE STMT_READ STMT_IF STMT_WHILE DECL_COMMA_BOOL DECL_COMMA_INT DECL_COMMA_DOUBLE
+%type <STMTnode> MAIN_CODE_BLOCK DECL_LIST DECL
 
 %%
 
-START:          Program BLOCK Eof
+START:          Program MAIN_CODE_BLOCK Eof
                 {
                     Compiler.rootNode = $2;
                 }
@@ -38,9 +38,9 @@ START:          Program BLOCK Eof
                 }
 ;
 
-BLOCK:          LeftCurlyBracket DECL_LIST STMT_LIST RightCurlyBracket
+MAIN_CODE_BLOCK:LeftCurlyBracket DECL_LIST STMT_LIST RightCurlyBracket
                 {
-                    $$ = new StatementNode($2, $3); 
+                    $$ = new SyntaxTreeStatementNode($2, $3); 
                 }
 |               LeftCurlyBracket DECL_LIST STMT_LIST Eof
                 {
@@ -49,7 +49,7 @@ BLOCK:          LeftCurlyBracket DECL_LIST STMT_LIST RightCurlyBracket
                 }
 ;
 
-BLOCK_INSTRUCTION:  LeftCurlyBracket STMT_LIST RightCurlyBracket
+CODE_BLOCK:  LeftCurlyBracket STMT_LIST RightCurlyBracket
                     {
                     $$ = $2;
                     }
@@ -62,11 +62,11 @@ BLOCK_INSTRUCTION:  LeftCurlyBracket STMT_LIST RightCurlyBracket
 
 DECL_LIST:      DECL_LIST  DECL
                 {
-                       $$ = new StatementNode($1, $2);
+                       $$ = new SyntaxTreeStatementNode($1, $2);
                 }
 |               
                 {
-                        $$ = new StatementNode();
+                        $$ = new SyntaxTreeStatementNode();
                 }
 ;
 
@@ -84,55 +84,55 @@ DECL:           Bool Ident Semicolon
                 }
 |               Bool Ident DECL_COMMA_BOOL Semicolon 
                 {
-                $$ = new StatementNode(new DeclarationNode("bool", $2), $3);
+                $$ = new SyntaxTreeStatementNode(new DeclarationNode("bool", $2), $3);
                 }
 |               Int Ident DECL_COMMA_INT Semicolon
                 {
-                $$ = new StatementNode(new DeclarationNode("int", $2), $3);
+                $$ = new SyntaxTreeStatementNode(new DeclarationNode("int", $2), $3);
                 }
 |               Double Ident DECL_COMMA_DOUBLE Semicolon
                 {
-                $$ = new StatementNode(new DeclarationNode("double", $2), $3);
+                $$ = new SyntaxTreeStatementNode(new DeclarationNode("double", $2), $3);
                 }
 ;
 
 DECL_COMMA_BOOL: Comma Ident DECL_COMMA_BOOL
                 {
-                $$ = new StatementNode(new DeclarationNode("bool", $2), $3);
+                $$ = new SyntaxTreeStatementNode(new DeclarationNode("bool", $2), $3);
                 }
 |               Comma Ident
                 {
-                $$ = new StatementNode(new StatementNode(), new DeclarationNode("bool", $2));
+                $$ = new SyntaxTreeStatementNode(new SyntaxTreeStatementNode(), new DeclarationNode("bool", $2));
                 }
 ;
 
 DECL_COMMA_DOUBLE: Comma Ident DECL_COMMA_DOUBLE
                 {
-                $$ = new StatementNode(new DeclarationNode("double", $2), $3);
+                $$ = new SyntaxTreeStatementNode(new DeclarationNode("double", $2), $3);
                 }
 |               Comma Ident
                 {
-                $$ = new StatementNode(new StatementNode(), new DeclarationNode("double", $2));;
+                $$ = new SyntaxTreeStatementNode(new SyntaxTreeStatementNode(), new DeclarationNode("double", $2));;
                 }
 ;
 
 DECL_COMMA_INT: Comma Ident DECL_COMMA_INT
                 {
-                $$ = new StatementNode(new DeclarationNode("int", $2), $3);
+                $$ = new SyntaxTreeStatementNode(new DeclarationNode("int", $2), $3);
                 }
 |               Comma Ident
                 {
-                $$ = new StatementNode(new StatementNode(), new DeclarationNode("int", $2));
+                $$ = new SyntaxTreeStatementNode(new SyntaxTreeStatementNode(), new DeclarationNode("int", $2));
                 }
 ;
 
 STMT_LIST:  STMT_LIST STMT
             {
-                $$ = new StatementNode($1, $2);
+                $$ = new SyntaxTreeStatementNode($1, $2);
             }
 |           
             {
-                $$ = new StatementNode();
+                $$ = new SyntaxTreeStatementNode();
             }
 ;
 
@@ -156,7 +156,7 @@ STMT:       STMT_IF
             {
             $$ = $1;
             }
-|           BLOCK_INSTRUCTION
+|           CODE_BLOCK
             {
             $$ = $1;
             }
@@ -308,29 +308,9 @@ BITWISE_EXPR:   BITWISE_EXPR BitOr UNARY_EXPR
                 }
 ;
 
-UNARY_EXPR:     IntNumber
+UNARY_EXPR:     TERMINAL
                 {
-                $$ = new ValueNode("int", $1);
-                }
-|               RealNumber
-                {
-                $$ = new ValueNode("double", $1);
-                }
-|               HexIntNumber
-                {
-                $$ = new ValueNode("hex", $1);
-                }
-|               True
-                {
-                $$ = new ValueNode("bool", "true");
-                }
-|               False
-                {
-                $$ = new ValueNode("bool", "false");
-                }
-|               Ident
-                {
-                $$ = new IdentNode($1);
+                $$ = $1;
                 }
 |               Minus UNARY_EXPR
                 {
@@ -358,6 +338,31 @@ UNARY_EXPR:     IntNumber
                 }
 ;
 
+TERMINAL:       IntNumber
+                {
+                $$ = new ValueNode("int", $1);
+                }
+|               RealNumber
+                {
+                $$ = new ValueNode("double", $1);
+                }
+|               HexIntNumber
+                {
+                $$ = new ValueNode("hex", $1);
+                }
+|               True
+                {
+                $$ = new ValueNode("bool", "true");
+                }
+|               False
+                {
+                $$ = new ValueNode("bool", "false");
+                }
+|               Ident
+                {
+                $$ = new IdentNode($1);
+                }
+;
 %%
 
 public Parser(Scanner scanner) : base(scanner) { }

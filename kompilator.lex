@@ -5,8 +5,8 @@ IntNumber     (0|[1-9][0-9]*)
 HexIntNumber  (0(x|X)([a-f0-9]+))
 RealNumber    (0|[1-9][0-9]*)\.[0-9]+
 Ident         [a-zA-z][a-zA-Z0-9]*
-Comment       \/\/.*$
-Str        \"(\\.|[^"\n\\])*\"
+Comment       \/\/.*\n
+Str        \"([^\\\"\n]|\\.)*\"
 
 %%
 

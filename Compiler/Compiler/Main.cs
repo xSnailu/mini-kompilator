@@ -9,12 +9,9 @@ public enum CompilerType { Int_Type, Bool_Type, Double_type, Hex_Type, Void_Type
 
 public class Compiler
 {
-
     public static int errors = 0;
 
     public static int lineno = -1;
-
-    public static SyntaxTreeNode rootNode;
 
     public static Dictionary<string, CompilerType> Variables = new Dictionary<string, CompilerType>();
 
@@ -22,7 +19,7 @@ public class Compiler
 
     public static List<string> LogicalOperationsIdents = new List<string>();
 
-    public static int compilerCondIndex = 0;
+    public static SyntaxTreeNode rootNode;
     public static void SetRoot(SyntaxTreeNode root)
     {
         rootNode = root;
@@ -43,7 +40,6 @@ public class Compiler
         {
             Console.Write("\nsource file:  ");
             file = Console.ReadLine();
-            //file = "test.txt";
         }
         try
         {
@@ -62,9 +58,7 @@ public class Compiler
         Parser parser = new Parser(scanner);
         Console.WriteLine();
 
-
-
-        // wykrywanie błędów np. ponowna deklaracja albo uzycie niezadeklarowanej zmiennej
+        // wykrywanie syntax błędów
         try
         {
             parser.Parse();
@@ -76,43 +70,22 @@ public class Compiler
         }
         source.Close();
 
+        // jesli znaleziono syntax błąd to nie generuj kodu
         if (errors > 0)
         {
             return 1;
         }
 
-        // sprawdzanie typów
         if (rootNode == null)
         {
             Console.WriteLine("Parser can't parse program.");
             return 1;
         }
 
+        // spradzenie typów
         try
         {
             rootNode.CheckType();
-        }
-        catch (CompilerException e)
-        {
-            Console.WriteLine(e.Message);
-            return 1;
-        }
-
-        // generowanie kodu
-        sw = new StreamWriter(file + ".ll");
-        GenProlog();
-        try
-        {
-            if (rootNode == null)
-            {
-                Console.WriteLine("UNEXPECTED ERROR");
-                Console.WriteLine("Parser can't parse program.");
-                return 1;
-            }
-            else
-            {
-                GenCode();
-            }
         }
         catch (CompilerException e)
         {
@@ -121,6 +94,26 @@ public class Compiler
             return 1;
         }
 
+        // jesli znaleziono nieprawidlowe typy to nie generuj kodu
+        if (errors > 0)
+        {
+            return 1;
+        }
+
+        // generowanie kodu
+        sw = new StreamWriter(file + ".ll");
+
+        GenProlog();
+        try
+        { 
+            GenCode();
+        }
+        catch (CompilerException e)
+        {
+            Console.WriteLine("UNEXPECTED ERROR");
+            Console.WriteLine(e.Message);
+            return 1;
+        }
         GenEpilog();
         sw.Close();
         Console.WriteLine("  compilation successful\n");
@@ -191,6 +184,8 @@ public class Compiler
                 return CompilerType.Bool_Type;
             case "hex":
                 return CompilerType.Hex_Type;
+            case "void":
+                return CompilerType.Void_Type;
             default:
                 return CompilerType.Void_Type;
         }
@@ -208,10 +203,14 @@ public class Compiler
                 return "bool";
             case CompilerType.Hex_Type:
                 return "hex";
+            case CompilerType.Void_Type:
+                return "void";
             default:
                 return "void";
         }
     }
+
+    public static int compilerCondIndex = 0;
 
     public static int tempValueIndex = 0;
     public static string NewValueIdent()
@@ -262,27 +261,73 @@ public class Compiler
 
     public static void addNewError(string errorMsg)
     {
-        throw new CompilerException(errorMsg);
+        // throw new CompilerException(errorMsg);
+        errors++;
+        Console.WriteLine(errorMsg);
     }
 }
 
-public interface CodeGenerator
+public static class LLVMCodeGenerator
 {
-    string Alloca(string ident, string type);
-    string Store(string ident, string value, string type);
-}
-
-public class LLVMCodeGenerator : CodeGenerator
-{
-    public string Alloca(string ident, string type)
+    public static string Alloca(string ident, string type)
     {
         return $"{ident} = alloca {type}";
     }
 
-    public string Store(string ident, string value, string type)
+    public static string Br(string label)
     {
-        return $"store {type} {value}, {type}* {ident}");
+        return $"br label %{label}";
     }
+
+    public static string Br(string condition, string trueLabel, string falseLabel)
+    {
+        return $"br i1 {condition}, label %{trueLabel}, label %{falseLabel}";
+    }
+
+    public static string Label(string label)
+    {
+        return $"{label}:";
+    }
+
+    public static string Store(string ident, string value, string type)
+    {
+        return $"store {type} {value}, {type}* {ident}";
+    }
+
+    public static string Write(int stringSize, string stringIdent)
+    {
+        return $"call i32 (i8*, ...) @printf(i8* bitcast ([{stringSize} x i8]* {stringIdent} to i8*))";
+    }
+
+    public static string Write(int stringSize, string stringIdent, string value, string valueType)
+    {
+        return $"call i32 (i8*, ...) @printf(i8* bitcast ([{stringSize} x i8]* {stringIdent} to i8*), {valueType} {value})";
+    }
+
+    public static string Read(int stringSize, string stringIdent, string ident, string identType)
+    {
+        return $"call i32 (i8*, ...) @scanf(i8* bitcast ([{stringSize} x i8]* {stringIdent} to i8*), {identType}* {ident})";
+    }
+
+    public static string Load(string valueIdent, string type, string sourceIdent)
+    {
+        return $"{valueIdent} = load {type}, {type}* {sourceIdent}";
+    }
+
+    public static string Return(string value, string type)
+    {
+        return $"ret {type} {value}";
+    }
+
+    public static string GenericValueOperation(string outputIdent, string operation, string type, string leftValue, string rightVal)
+    {
+        return $"{outputIdent} = {operation} {type} {leftValue}, {rightVal}";
+    }
+    public static string ConvertOperation(string outputIdent, string operation, string fromType, string value, string toType)
+    {
+        return $"{outputIdent} = {operation} {fromType} {value} to {toType}";
+    }
+
 }
 
 
@@ -295,12 +340,12 @@ public abstract class SyntaxTreeNode
     public abstract string GenCode();
 }
 
-public class StatementNode : SyntaxTreeNode
+public class SyntaxTreeStatementNode : SyntaxTreeNode
 {
     SyntaxTreeNode leftNode;
     SyntaxTreeNode rightNode;
 
-    public StatementNode()
+    public SyntaxTreeStatementNode()
     {
         this.line = Compiler.lineno;
         this.type = CompilerType.Void_Type;
@@ -308,7 +353,7 @@ public class StatementNode : SyntaxTreeNode
         leftNode = new EmptyNode();
         rightNode = new EmptyNode();
     }
-    public StatementNode(SyntaxTreeNode lN, SyntaxTreeNode rN)
+    public SyntaxTreeStatementNode(SyntaxTreeNode lN, SyntaxTreeNode rN)
     {
         leftNode = lN;
         rightNode = rN;
@@ -361,16 +406,16 @@ public class EmptyNode : SyntaxTreeNode
     }
 }
 
-public abstract class ExpressionNode : SyntaxTreeNode
+public abstract class SyntaxTreeExpressionNode : SyntaxTreeNode
 {
 
 }
 
 public class ExpressionParentNode : SyntaxTreeNode
 {
-    ExpressionNode expression;
+    SyntaxTreeExpressionNode expression;
 
-    public ExpressionParentNode(ExpressionNode e)
+    public ExpressionParentNode(SyntaxTreeExpressionNode e)
     {
         this.line = Compiler.lineno;
         expression = e;
@@ -400,7 +445,7 @@ public class DeclarationNode : SyntaxTreeNode
 
         if (Compiler.Variables.ContainsKey(ident))
         {
-            Compiler.addNewError($"Variable {ident} already declared. Line: {this.line}");
+            Compiler.addNewError($"Variable {ident} is already declared. Line: {this.line}");
         }
         else
         {
@@ -418,20 +463,20 @@ public class DeclarationNode : SyntaxTreeNode
         switch (type)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode($"%{this.ident} = alloca i32");
-                Compiler.EmitCode($"store i32 0, i32* %{this.ident}");
+                Compiler.EmitCode(LLVMCodeGenerator.Alloca($"%{this.ident}", "i32"));
+                Compiler.EmitCode(LLVMCodeGenerator.Store($"%{this.ident}", "0", "i32"));
                 break;
             case CompilerType.Bool_Type:
-                Compiler.EmitCode($"%{this.ident} = alloca i1");
-                Compiler.EmitCode($"store i1 0, i1* %{this.ident}");
+                Compiler.EmitCode(LLVMCodeGenerator.Alloca($"%{this.ident}", "i1"));
+                Compiler.EmitCode(LLVMCodeGenerator.Store($"%{this.ident}", "0", "i1"));
                 break;
             case CompilerType.Double_type:
-                Compiler.EmitCode($"%{this.ident} = alloca double");
-                Compiler.EmitCode($"store double 0.0, double* %{this.ident}");
+                Compiler.EmitCode(LLVMCodeGenerator.Alloca($"%{this.ident}", "double"));
+                Compiler.EmitCode(LLVMCodeGenerator.Store($"%{this.ident}", "0.0", "double"));
                 break;
             case CompilerType.Hex_Type:
-                Compiler.EmitCode($"%{this.ident} = alloca i32");
-                Compiler.EmitCode($"store i32 0, i32* %{this.ident}");
+                Compiler.EmitCode(LLVMCodeGenerator.Alloca($"%{this.ident}", "i32"));
+                Compiler.EmitCode(LLVMCodeGenerator.Store($"%{this.ident}", "0", "i32"));
                 break;
             case CompilerType.Void_Type:
                 break;
@@ -447,8 +492,8 @@ public class DeclarationNode : SyntaxTreeNode
 public class IfNode : SyntaxTreeNode
 {
     SyntaxTreeNode statement;
-    ExpressionNode condition;
-    public IfNode(SyntaxTreeNode s, ExpressionNode c)
+    SyntaxTreeExpressionNode condition;
+    public IfNode(SyntaxTreeNode s, SyntaxTreeExpressionNode c)
     {
         this.line = Compiler.lineno;
         statement = s;
@@ -474,14 +519,14 @@ public class IfNode : SyntaxTreeNode
         string condTrueLabel = Compiler.newTrueLabel();
         string condFalseLabel = Compiler.newFalseLabel();
 
-        Compiler.EmitCode($"br label %{entryLabel}");
-        Compiler.EmitCode($"{entryLabel}:");
-        string condIndent = condition.GenCode();
-        Compiler.EmitCode($"br i1 {condIndent}, label %{condTrueLabel}, label %{condFalseLabel}");
-        Compiler.EmitCode($"{condTrueLabel}:");
+        Compiler.EmitCode(LLVMCodeGenerator.Br(entryLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(entryLabel));
+        string condVal = condition.GenCode();
+        Compiler.EmitCode(LLVMCodeGenerator.Br(condVal, condTrueLabel, condFalseLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(condTrueLabel));
         statement.GenCode();
-        Compiler.EmitCode($"br label %{condFalseLabel}");
-        Compiler.EmitCode($"{condFalseLabel}:");
+        Compiler.EmitCode(LLVMCodeGenerator.Br(condFalseLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(condFalseLabel));
         return null;
     }
 }
@@ -490,9 +535,9 @@ public class IfElseNode : SyntaxTreeNode
 {
     SyntaxTreeNode statementT;
     SyntaxTreeNode statementF;
-    ExpressionNode condition;
+    SyntaxTreeExpressionNode condition;
 
-    public IfElseNode(SyntaxTreeNode sT, SyntaxTreeNode sF, ExpressionNode c)
+    public IfElseNode(SyntaxTreeNode sT, SyntaxTreeNode sF, SyntaxTreeExpressionNode c)
     {
         this.line = Compiler.lineno;
         statementT = sT;
@@ -519,19 +564,19 @@ public class IfElseNode : SyntaxTreeNode
         string entryLabel = Compiler.newEntryLabel();
         string condTrueLabel = Compiler.newTrueLabel();
         string condFalseLabel = Compiler.newFalseLabel();
-        string newOutLabel = Compiler.newOutLabel();
+        string condOutLabel = Compiler.newOutLabel();
 
-        Compiler.EmitCode($"br label %{entryLabel}");
-        Compiler.EmitCode($"{entryLabel}:");
-        string condIndent = condition.GenCode();
-        Compiler.EmitCode($"br i1 {condIndent}, label %{condTrueLabel}, label %{condFalseLabel}");
-        Compiler.EmitCode($"{condTrueLabel}:");
+        Compiler.EmitCode(LLVMCodeGenerator.Br(entryLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(entryLabel));
+        string condVal = condition.GenCode();
+        Compiler.EmitCode(LLVMCodeGenerator.Br(condVal, condTrueLabel, condFalseLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(condTrueLabel));
         statementT.GenCode();
-        Compiler.EmitCode($"br label %{newOutLabel}");
-        Compiler.EmitCode($"{condFalseLabel}:");
+        Compiler.EmitCode(LLVMCodeGenerator.Br(condOutLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(condFalseLabel));
         statementF.GenCode();
-        Compiler.EmitCode($"br label %{newOutLabel}");
-        Compiler.EmitCode($"{newOutLabel}:");
+        Compiler.EmitCode(LLVMCodeGenerator.Br(condOutLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(condOutLabel));
         return null;
     }
 }
@@ -541,9 +586,9 @@ public class IfElseNode : SyntaxTreeNode
 public class WhileNode : SyntaxTreeNode
 {
     SyntaxTreeNode statement;
-    ExpressionNode condition;
+    SyntaxTreeExpressionNode condition;
 
-    public WhileNode(SyntaxTreeNode s, ExpressionNode c)
+    public WhileNode(SyntaxTreeNode s, SyntaxTreeExpressionNode c)
     {
         this.line = Compiler.lineno;
         statement = s;
@@ -565,16 +610,16 @@ public class WhileNode : SyntaxTreeNode
     {
         string entryLabel = Compiler.newEntryLabel();
         string condTrueLabel = Compiler.newTrueLabel();
-        string newOutLabel = Compiler.newOutLabel();
+        string condOutLabel = Compiler.newOutLabel();
 
-        Compiler.EmitCode($"br label %{entryLabel}");
-        Compiler.EmitCode($"{entryLabel}:");
-        string condIndent = condition.GenCode();
-        Compiler.EmitCode($"br i1 {condIndent}, label %{condTrueLabel}, label %{newOutLabel}");
-        Compiler.EmitCode($"{condTrueLabel}:");
+        Compiler.EmitCode(LLVMCodeGenerator.Br(entryLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(entryLabel));
+        string condVal = condition.GenCode();
+        Compiler.EmitCode(LLVMCodeGenerator.Br(condVal, condTrueLabel, condOutLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(condTrueLabel));
         statement.GenCode();
-        Compiler.EmitCode($"br label %{entryLabel}");
-        Compiler.EmitCode($"{newOutLabel}:");
+        Compiler.EmitCode(LLVMCodeGenerator.Br(entryLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(condOutLabel));
         return null;
     }
 }
@@ -639,17 +684,17 @@ public class WriteStringNode : SyntaxTreeNode
     public override string GenCode()
     {
         string str = Compiler.Strings[stringId];
-        string name = Compiler.getStringGlobalVariableNameById(stringId);
+        string strName = Compiler.getStringGlobalVariableNameById(stringId);
         int specialCharCount = Regex.Matches(str, @"\\[0-9 A-Z][0-9 A-F]").Count;
-        Compiler.EmitCode($"call i32 (i8*, ...) @printf(i8* bitcast ([{str.Length + 1 - specialCharCount * 2} x i8]* {name} to i8*))");
+        Compiler.EmitCode(LLVMCodeGenerator.Write(str.Length + 1 - specialCharCount * 2, strName));
         return null;
     }
 }
 public class WriteHexExpressionNode : SyntaxTreeNode
 {
-    ExpressionNode expression;
+    SyntaxTreeExpressionNode expression;
 
-    public WriteHexExpressionNode(ExpressionNode e)
+    public WriteHexExpressionNode(SyntaxTreeExpressionNode e)
     {
         this.line = Compiler.lineno;
         expression = e;
@@ -670,16 +715,16 @@ public class WriteHexExpressionNode : SyntaxTreeNode
     public override string GenCode()
     {
         string v = expression.GenCode();
-        Compiler.EmitCode($"call i32 (i8*, ...) @printf(i8* bitcast ([5 x i8]* @hex_res to i8*), i32 {v})");
+        Compiler.EmitCode(LLVMCodeGenerator.Write(5, "@hex_res", "i32", v));
         return null;
     }
 }
 
 public class WriteExpressionNode : SyntaxTreeNode
 {
-    ExpressionNode expression;
+    SyntaxTreeExpressionNode expression;
 
-    public WriteExpressionNode(ExpressionNode e)
+    public WriteExpressionNode(SyntaxTreeExpressionNode e)
     {
         this.line = Compiler.lineno;
         expression = e;
@@ -704,27 +749,28 @@ public class WriteExpressionNode : SyntaxTreeNode
         switch (ExpType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode($"call i32 (i8*, ...) @printf(i8* bitcast ([3 x i8]* @int_res to i8*), i32 {v})");
+                Compiler.EmitCode(LLVMCodeGenerator.Write(3, "@int_res", v, "i32"));
                 break;
             case CompilerType.Bool_Type:
                 string entryLabel = Compiler.newEntryLabel();
                 string condTrueLabel = Compiler.newTrueLabel();
                 string condFalseLabel = Compiler.newFalseLabel();
-                string newOutLabel = Compiler.newOutLabel();
-                Compiler.EmitCode($"br label %{entryLabel}");
-                Compiler.EmitCode($"{entryLabel}:");
-                string condIndent = expression.GenCode();
-                Compiler.EmitCode($"br i1 {condIndent}, label %{condTrueLabel}, label %{condFalseLabel}");
-                Compiler.EmitCode($"{condTrueLabel}:");
-                Compiler.EmitCode($"call i32 (i8*, ...) @printf(i8* bitcast ([5 x i8]* @true_res to i8*))");
-                Compiler.EmitCode($"br label %{newOutLabel}");
-                Compiler.EmitCode($"{condFalseLabel}:");
-                Compiler.EmitCode($"call i32 (i8*, ...) @printf(i8* bitcast ([6 x i8]* @false_res to i8*))");
-                Compiler.EmitCode($"br label %{newOutLabel}");
-                Compiler.EmitCode($"{newOutLabel}:");
+                string condOutLabel = Compiler.newOutLabel();
+
+                Compiler.EmitCode(LLVMCodeGenerator.Br(entryLabel));
+                Compiler.EmitCode(LLVMCodeGenerator.Label(entryLabel));
+                string condVal = expression.GenCode();
+                Compiler.EmitCode(LLVMCodeGenerator.Br(condVal, condTrueLabel, condFalseLabel));
+                Compiler.EmitCode(LLVMCodeGenerator.Label(condTrueLabel));
+                Compiler.EmitCode(LLVMCodeGenerator.Write(5, "@true_res"));
+                Compiler.EmitCode(LLVMCodeGenerator.Br(condOutLabel));
+                Compiler.EmitCode(LLVMCodeGenerator.Label(condFalseLabel));
+                Compiler.EmitCode(LLVMCodeGenerator.Write(6, "@false_res"));
+                Compiler.EmitCode(LLVMCodeGenerator.Br(condOutLabel));
+                Compiler.EmitCode(LLVMCodeGenerator.Label(condOutLabel));
                 break;
             case CompilerType.Double_type:
-                Compiler.EmitCode($"call i32 (i8*, ...) @printf(i8* bitcast ([4 x i8]* @double_res to i8*), double {v})");
+                Compiler.EmitCode(LLVMCodeGenerator.Write(4, "@double_res", v, "double"));
                 break;
             case CompilerType.Hex_Type:
                 break;
@@ -753,12 +799,13 @@ public class ReadNode : SyntaxTreeNode
         if (!Compiler.Variables.ContainsKey(ident))
         {
             Compiler.addNewError($"Read try read to undeclared ident: {this.ident}. LINE: {this.line}.");
-        }
-
-        CompilerType typeToCheck = Compiler.Variables[ident];
-        if (typeToCheck != CompilerType.Int_Type && typeToCheck != CompilerType.Double_type)
+        }else
         {
-            Compiler.addNewError($"Wrong argument in read at line: {this.line}. Expected int, double - got {Compiler.compilerTypeToString(typeToCheck)}.");
+            CompilerType typeToCheck = Compiler.Variables[ident];
+            if (typeToCheck != CompilerType.Int_Type && typeToCheck != CompilerType.Double_type)
+            {
+                Compiler.addNewError($"Wrong argument in read at line: {this.line}. Expected int, double - got {Compiler.compilerTypeToString(typeToCheck)}.");
+            }
         }
 
         return this.type;
@@ -771,10 +818,10 @@ public class ReadNode : SyntaxTreeNode
         {
             // Uwzględniona konwersja int -> double albo odwrotnie
             case CompilerType.Int_Type:
-                Compiler.EmitCode($"call i32 (i8*, ...) @scanf(i8* bitcast ([3 x i8]* @read_int to i8*), i32* %{ident})");
+                Compiler.EmitCode(LLVMCodeGenerator.Read(3, "@read_int", "%" + ident, "i32"));
                 break;
             case CompilerType.Double_type:
-                Compiler.EmitCode($"call i32 (i8*, ...) @scanf(i8* bitcast ([4 x i8]* @read_double to i8*), double* %{ident})");
+                Compiler.EmitCode(LLVMCodeGenerator.Read(4, "@read_double", "%" + ident, "double"));
                 break;
             default:
                 break;
@@ -814,7 +861,7 @@ public class ReadHexNode : SyntaxTreeNode
     public override string GenCode()
     {
         this.type = Compiler.Variables[ident];
-        Compiler.EmitCode($"call i32 (i8*, ...) @scanf(i8* bitcast ([3 x i8]* @read_hex to i8*), i32* %{ident})");
+        Compiler.EmitCode(LLVMCodeGenerator.Read(3, "@read_hex", "%" + ident, "i32"));
         return null;
     }
 }
@@ -834,17 +881,17 @@ public class ReturnNode : SyntaxTreeNode
 
     public override string GenCode()
     {
-        Compiler.EmitCode($"ret i32 0");
+        Compiler.EmitCode(LLVMCodeGenerator.Return("0", "i32"));
         return null;
     }
 }
 
-public class AssignNode : ExpressionNode
+public class AssignNode : SyntaxTreeExpressionNode
 {
     string ident;
-    ExpressionNode expression;
+    SyntaxTreeExpressionNode expression;
 
-    public AssignNode(string i, ExpressionNode e)
+    public AssignNode(string i, SyntaxTreeExpressionNode e)
     {
         this.line = Compiler.lineno;
         ident = i;
@@ -853,9 +900,10 @@ public class AssignNode : ExpressionNode
         if (!Compiler.Variables.ContainsKey(ident))
         {
             Compiler.addNewError($"Can't assign to undeclared ident: {ident}. Line: {this.line}.");
+        }else
+        {
+            this.type = Compiler.Variables[ident];
         }
-
-        this.type = Compiler.Variables[ident];
     }
     public override CompilerType CheckType()
     {
@@ -899,28 +947,28 @@ public class AssignNode : ExpressionNode
         {
             case CompilerType.Int_Type: // ident int, arg int (w postaci ident albo value)
                 {
-                    Compiler.EmitCode($"store i32 {v}, i32* %{this.ident}");
-                    Compiler.EmitCode($"{assignTempIdent} = load i32, i32* %{this.ident}");
+                    Compiler.EmitCode(LLVMCodeGenerator.Store("%" + ident, v, "i32"));
+                    Compiler.EmitCode(LLVMCodeGenerator.Load(assignTempIdent, "i32", "%" + ident));
                 }
                 break;
             case CompilerType.Bool_Type: // ident bool, arg bool (w postaci ident albo value)
                 {
-                    Compiler.EmitCode($"store i1 {v}, i1* %{this.ident}");
-                    Compiler.EmitCode($"{assignTempIdent} = load i1, i1* %{this.ident}");
+                    Compiler.EmitCode(LLVMCodeGenerator.Store("%" + ident, v, "i1"));
+                    Compiler.EmitCode(LLVMCodeGenerator.Load(assignTempIdent, "i1", "%" + ident));
                 }
                 break;
             case CompilerType.Double_type: // ident double, arg int lub double (w postaci ident albo value)
                 if (expType == CompilerType.Int_Type) // potrzebna konwersja
                 {
-                    string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {v} to double");
-                    Compiler.EmitCode($"store double {convertedIdent}, double* %{this.ident}");
-                    Compiler.EmitCode($"{assignTempIdent} = load double, double* %{this.ident}");
+                    string convertedVal = Compiler.NewValueIdent();
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedVal, "sitofp", "i32", v, "double"));
+                    Compiler.EmitCode(LLVMCodeGenerator.Store("%" + ident, convertedVal, "double"));
+                    Compiler.EmitCode(LLVMCodeGenerator.Load(assignTempIdent, "double", "%" + ident));
                 }
                 else // nie potrzebna konwersja
                 {
-                    Compiler.EmitCode($"store double {v}, double* %{this.ident}");
-                    Compiler.EmitCode($"{assignTempIdent} = load double, double* %{this.ident}");
+                    Compiler.EmitCode(LLVMCodeGenerator.Store("%" + ident, v, "double"));
+                    Compiler.EmitCode(LLVMCodeGenerator.Load(assignTempIdent, "double", "%" + ident));
                 }
                 break;
             case CompilerType.Hex_Type:
@@ -935,7 +983,7 @@ public class AssignNode : ExpressionNode
 }
 
 // UNARY_EXPR
-public class ValueNode : ExpressionNode
+public class ValueNode : SyntaxTreeExpressionNode
 {
     string value;
 
@@ -976,7 +1024,7 @@ public class ValueNode : ExpressionNode
     }
 }
 
-public class IdentNode : ExpressionNode
+public class IdentNode : SyntaxTreeExpressionNode
 {
     string ident;
 
@@ -989,8 +1037,10 @@ public class IdentNode : ExpressionNode
         if (!Compiler.Variables.ContainsKey(ident))
         {
             Compiler.addNewError($"An attempt to use undeclared variable {ident}. Line: {this.line}.");
+        }else
+        {
+            this.type = Compiler.Variables[ident];
         }
-        this.type = Compiler.Variables[ident];
     }
     public override CompilerType CheckType()
     {
@@ -1003,13 +1053,13 @@ public class IdentNode : ExpressionNode
         switch (this.type)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = load {1}, {1}* %{2}", tempIdent, "i32", ident);
+                Compiler.EmitCode(LLVMCodeGenerator.Load(tempIdent, "i32", "%" + ident));
                 break;
             case CompilerType.Bool_Type:
-                Compiler.EmitCode("{0} = load {1}, {1}* %{2}", tempIdent, "i1", ident);
+                Compiler.EmitCode(LLVMCodeGenerator.Load(tempIdent, "i1", "%" + ident));
                 break;
             case CompilerType.Double_type:
-                Compiler.EmitCode("{0} = load {1}, {1}* %{2}", tempIdent, "double", ident);
+                Compiler.EmitCode(LLVMCodeGenerator.Load(tempIdent, "double", "%" + ident));
                 break;
             default:
                 break;
@@ -1018,10 +1068,10 @@ public class IdentNode : ExpressionNode
     }
 }
 
-public class ConvertToNode : ExpressionNode
+public class ConvertToNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode expression;
-    public ConvertToNode(string typeS, ExpressionNode e)
+    SyntaxTreeExpressionNode expression;
+    public ConvertToNode(string typeS, SyntaxTreeExpressionNode e)
     {
         this.line = Compiler.lineno;
         expression = e;
@@ -1052,7 +1102,6 @@ public class ConvertToNode : ExpressionNode
     {
         CompilerType expType = expression.CheckType();
         string curValue = expression.GenCode();
-        string bufValue = Compiler.NewValueIdent();
         string convertedValue = Compiler.NewValueIdent();
 
         switch (this.type)
@@ -1065,12 +1114,12 @@ public class ConvertToNode : ExpressionNode
                 }
                 else if (expType == CompilerType.Double_type)
                 {
-                    Compiler.EmitCode($"{convertedValue} = fptosi double {curValue} to i32");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedValue, "fptosi", "double", curValue, "i32" ));
                     break;
                 }
                 else // konwersja z boola
                 {
-                    Compiler.EmitCode($"{convertedValue} = zext i1 {curValue} to i32 ");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedValue, "zext", "i1", curValue, "i32"));
                     break;
                 }
             case CompilerType.Double_type:
@@ -1081,7 +1130,7 @@ public class ConvertToNode : ExpressionNode
                 }
                 else
                 {
-                    Compiler.EmitCode($"{convertedValue} = sitofp i32 {curValue} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedValue, "sitofp", "i32", curValue, "double"));
                 }
                 break;
             default:
@@ -1093,10 +1142,10 @@ public class ConvertToNode : ExpressionNode
     }
 }
 
-public class BitwiseNegationNode : ExpressionNode
+public class BitwiseNegationNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode expression;
-    public BitwiseNegationNode(ExpressionNode e)
+    SyntaxTreeExpressionNode expression;
+    public BitwiseNegationNode(SyntaxTreeExpressionNode e)
     {
         this.line = Compiler.lineno;
         expression = e;
@@ -1118,15 +1167,15 @@ public class BitwiseNegationNode : ExpressionNode
         expression.CheckType();
         string curValue = expression.GenCode();
         string tempValue = Compiler.NewValueIdent();
-        Compiler.EmitCode($"{tempValue} = xor i32 {curValue}, -1");
+        Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempValue, "xor", "i32", curValue, "-1"));
         return tempValue;
     }
 }
 
-public class LogicalNegationNode : ExpressionNode
+public class LogicalNegationNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode expression;
-    public LogicalNegationNode(ExpressionNode e)
+    SyntaxTreeExpressionNode expression;
+    public LogicalNegationNode(SyntaxTreeExpressionNode e)
     {
         this.line = Compiler.lineno;
         expression = e;
@@ -1147,15 +1196,15 @@ public class LogicalNegationNode : ExpressionNode
     {
         string curValue = expression.GenCode();
         string tempValue = Compiler.NewValueIdent();
-        Compiler.EmitCode($"{tempValue} = xor i1 {curValue}, -1");
+        Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempValue, "xor", "i1", curValue, "-1"));
         return tempValue;
     }
 }
 
-public class UnaryMinusNode : ExpressionNode
+public class UnaryMinusNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode expression;
-    public UnaryMinusNode(ExpressionNode e)
+    SyntaxTreeExpressionNode expression;
+    public UnaryMinusNode(SyntaxTreeExpressionNode e)
     {
         this.line = Compiler.lineno;
         expression = e;
@@ -1177,32 +1226,32 @@ public class UnaryMinusNode : ExpressionNode
 
         if (this.type == CompilerType.Int_Type)
         {
-            string curIdent = expression.GenCode();
+            string curVal = expression.GenCode();
             string firstSubBuf = Compiler.NewValueIdent();
             string secondSubBuf = Compiler.NewValueIdent();
-            Compiler.EmitCode($"{firstSubBuf} = sub i32 {curIdent}, {curIdent}");
-            Compiler.EmitCode($"{secondSubBuf} = sub i32 {firstSubBuf}, {curIdent}");
+            Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(firstSubBuf, "sub", "i32", curVal, curVal));
+            Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(secondSubBuf, "sub", "i32", firstSubBuf, curVal));
             return secondSubBuf;
         }
         else // wyrazenie typu double
         {
-            string curIdent = expression.GenCode();
+            string curVal = expression.GenCode();
             string firstSubBuf = Compiler.NewValueIdent();
             string secondSubBuf = Compiler.NewValueIdent();
-            Compiler.EmitCode($"{firstSubBuf} = fsub double {curIdent}, {curIdent}");
-            Compiler.EmitCode($"{secondSubBuf} = fsub double {firstSubBuf}, {curIdent}");
+            Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(firstSubBuf, "fsub", "double", curVal, curVal));
+            Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(secondSubBuf, "fsub", "double", firstSubBuf, curVal));
             return secondSubBuf;
         }
     }
 }
 
 // BITWISE_EXPR
-public class BitwiseOrNode : ExpressionNode
+public class BitwiseOrNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
 
-    public BitwiseOrNode(ExpressionNode lE, ExpressionNode rE)
+    public BitwiseOrNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -1230,18 +1279,18 @@ public class BitwiseOrNode : ExpressionNode
 
         string val1 = leftExpression.GenCode();
         string val2 = rightExpression.GenCode();
-        string curTempIdent = Compiler.NewValueIdent();
-        Compiler.EmitCode($"{curTempIdent} = or i32 {val1}, {val2}");
-        return curTempIdent;
+        string curTempVal = Compiler.NewValueIdent();
+        Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(curTempVal, "or", "i32", val1, val2));
+        return curTempVal;
     }
 }
 
-public class BitwiseAndNode : ExpressionNode
+public class BitwiseAndNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
 
-    public BitwiseAndNode(ExpressionNode lE, ExpressionNode rE)
+    public BitwiseAndNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -1268,19 +1317,19 @@ public class BitwiseAndNode : ExpressionNode
 
         string val1 = leftExpression.GenCode();
         string val2 = rightExpression.GenCode();
-        string curTempIdent = Compiler.NewValueIdent();
-        Compiler.EmitCode($"{curTempIdent} = and i32 {val1}, {val2}");
-        return curTempIdent;
+        string curTempVal = Compiler.NewValueIdent();
+        Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(curTempVal, "and", "i32", val1, val2));
+        return curTempVal;
     }
 }
 
 // MULTIPLICATIVE_EXPR
-public class MultipliesNode : ExpressionNode
+public class MultipliesNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
 
-    public MultipliesNode(ExpressionNode lE, ExpressionNode rE)
+    public MultipliesNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -1328,42 +1377,26 @@ public class MultipliesNode : ExpressionNode
 
         string tempVal = Compiler.NewValueIdent();
 
-        CompilerType relationType;
-        if (leftType == CompilerType.Bool_Type && rightType == CompilerType.Bool_Type)
-        {
-            relationType = CompilerType.Bool_Type;
-        }
-        else if (leftType == CompilerType.Double_type || rightType == CompilerType.Double_type)
-        {
-            relationType = CompilerType.Double_type;
-        }
-        else
-        {
-            relationType = CompilerType.Int_Type;
-        }
-
-
-        switch (relationType)
+        switch (this.type)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "mul i32", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "mul", "i32", leftVal, rightVal));
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {leftVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", leftVal, "double"));
                     leftVal = convertedIdent;
                 }
-
                 if (rightType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {rightVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", rightVal, "double"));
                     rightVal = convertedIdent;
                 }
 
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fmul double", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "fmul", "double", leftVal, rightVal));
                 break;
             default:
                 break;
@@ -1373,12 +1406,12 @@ public class MultipliesNode : ExpressionNode
     }
 }
 
-public class DivisionNode : ExpressionNode
+public class DivisionNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
 
-    public DivisionNode(ExpressionNode lE, ExpressionNode rE)
+    public DivisionNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -1425,41 +1458,25 @@ public class DivisionNode : ExpressionNode
 
         string tempVal = Compiler.NewValueIdent();
 
-        CompilerType relationType;
-        if (leftType == CompilerType.Bool_Type && rightType == CompilerType.Bool_Type)
-        {
-            relationType = CompilerType.Bool_Type;
-        }
-        else if (leftType == CompilerType.Double_type || rightType == CompilerType.Double_type)
-        {
-            relationType = CompilerType.Double_type;
-        }
-        else
-        {
-            relationType = CompilerType.Int_Type;
-        }
-
-        switch (relationType)
+        switch (this.type)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "sdiv i32", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "sdiv", "i32", leftVal, rightVal));
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {leftVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", leftVal, "double"));
                     leftVal = convertedIdent;
                 }
-
                 if (rightType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {rightVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", rightVal, "double"));
                     rightVal = convertedIdent;
                 }
-
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fdiv double", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "fdiv", "double", leftVal, rightVal));
                 break;
             default:
                 break;
@@ -1470,12 +1487,12 @@ public class DivisionNode : ExpressionNode
 }
 
 // ADDITIVE_EXPR
-public class PlusNode : ExpressionNode
+public class PlusNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
 
-    public PlusNode(ExpressionNode lE, ExpressionNode rE)
+    public PlusNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -1520,42 +1537,26 @@ public class PlusNode : ExpressionNode
         string leftVal = leftExpression.GenCode();
         string rightVal = rightExpression.GenCode();
 
-        CompilerType relationType;
-        if (leftType == CompilerType.Bool_Type && rightType == CompilerType.Bool_Type)
-        {
-            relationType = CompilerType.Bool_Type;
-        }
-        else if (leftType == CompilerType.Double_type || rightType == CompilerType.Double_type)
-        {
-            relationType = CompilerType.Double_type;
-        }
-        else
-        {
-            relationType = CompilerType.Int_Type;
-        }
-
         string tempVal = Compiler.NewValueIdent();
-        switch (relationType)
+        switch (this.type)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "add i32", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "add", "i32", leftVal, rightVal));
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {leftVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", leftVal, "double"));
                     leftVal = convertedIdent;
                 }
-
                 if (rightType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {rightVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", rightVal, "double"));
                     rightVal = convertedIdent;
                 }
-
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fadd double", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "fadd", "double", leftVal, rightVal));
                 break;
             default:
                 break;
@@ -1565,12 +1566,12 @@ public class PlusNode : ExpressionNode
     }
 }
 
-public class MinusNode : ExpressionNode
+public class MinusNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
 
-    public MinusNode(ExpressionNode lE, ExpressionNode rE)
+    public MinusNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -1617,40 +1618,25 @@ public class MinusNode : ExpressionNode
 
         string tempIdent = Compiler.NewValueIdent();
 
-        CompilerType relationType;
-        if (leftType == CompilerType.Bool_Type && rightType == CompilerType.Bool_Type)
-        {
-            relationType = CompilerType.Bool_Type;
-        }
-        else if (leftType == CompilerType.Double_type || rightType == CompilerType.Double_type)
-        {
-            relationType = CompilerType.Double_type;
-        }
-        else
-        {
-            relationType = CompilerType.Int_Type;
-        }
-        switch (relationType)
+        switch (this.type)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "sub i32", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempIdent, "sub", "i32", leftVal, rightVal));
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {leftVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", leftVal, "double"));
                     leftVal = convertedIdent;
                 }
-
                 if (rightType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {rightVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", rightVal, "double"));
                     rightVal = convertedIdent;
                 }
-
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "fsub double", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempIdent, "fsub", "double", leftVal, rightVal));
                 break;
             default:
                 break;
@@ -1661,12 +1647,12 @@ public class MinusNode : ExpressionNode
 }
 
 // RELATIONAL_EXPR
-public class EqualNode : ExpressionNode
+public class EqualNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
 
-    public EqualNode(ExpressionNode lE, ExpressionNode rE)
+    public EqualNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -1711,7 +1697,7 @@ public class EqualNode : ExpressionNode
         string tempIdent = Compiler.NewValueIdent();
 
         CompilerType relationType;
-        if (leftType == CompilerType.Bool_Type && rightType == CompilerType.Bool_Type)
+        if(leftType == CompilerType.Bool_Type || rightType == CompilerType.Bool_Type)
         {
             relationType = CompilerType.Bool_Type;
         }
@@ -1724,31 +1710,28 @@ public class EqualNode : ExpressionNode
             relationType = CompilerType.Int_Type;
         }
 
-
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "icmp eq i32", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempIdent, "icmp eq", "i32", leftVal, rightVal));
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
                 {
-                    string convertedVal = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedVal} = sitofp i32 {leftVal} to double");
-                    leftVal = convertedVal;
+                    string convertedIdent = Compiler.NewValueIdent();
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", leftVal, "double"));
+                    leftVal = convertedIdent;
                 }
-
                 if (rightType == CompilerType.Int_Type)
                 {
-                    string convertedVal = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedVal} = sitofp i32 {rightVal} to double");
-                    rightVal = convertedVal;
+                    string convertedIdent = Compiler.NewValueIdent();
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", rightVal, "double"));
+                    rightVal = convertedIdent;
                 }
-
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "fcmp oeq double", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempIdent, "fcmp oeq", "double", leftVal, rightVal));
                 break;
             case CompilerType.Bool_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempIdent, "icmp eq i1", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempIdent, "icmp eq", "i1", leftVal, rightVal));
                 break;
             default:
                 break;
@@ -1758,12 +1741,12 @@ public class EqualNode : ExpressionNode
     }
 }
 
-public class UnequalNode : ExpressionNode
+public class UnequalNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
 
-    public UnequalNode(ExpressionNode lE, ExpressionNode rE)
+    public UnequalNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -1809,7 +1792,7 @@ public class UnequalNode : ExpressionNode
         string tempVal = Compiler.NewValueIdent();
 
         CompilerType relationType;
-        if (leftType == CompilerType.Bool_Type && rightType == CompilerType.Bool_Type)
+        if (leftType == CompilerType.Bool_Type || rightType == CompilerType.Bool_Type)
         {
             relationType = CompilerType.Bool_Type;
         }
@@ -1822,32 +1805,28 @@ public class UnequalNode : ExpressionNode
             relationType = CompilerType.Int_Type;
         }
 
-
-
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "icmp ne i32", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "icmp ne", "i32", leftVal, rightVal));
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {leftVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", leftVal, "double"));
                     leftVal = convertedIdent;
                 }
-
                 if (rightType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {rightVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", rightVal, "double"));
                     rightVal = convertedIdent;
                 }
-
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fcmp one double", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "fcmp one", "double", leftVal, rightVal));
                 break;
             case CompilerType.Bool_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "icmp ne i1", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "icmp ne", "i1", leftVal, rightVal));
                 break;
             default:
                 break;
@@ -1857,12 +1836,12 @@ public class UnequalNode : ExpressionNode
     }
 }
 
-public class GreaterNode : ExpressionNode
+public class GreaterNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
 
-    public GreaterNode(ExpressionNode lE, ExpressionNode rE)
+    public GreaterNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -1912,24 +1891,22 @@ public class GreaterNode : ExpressionNode
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "icmp sgt i32", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "icmp sgt", "i32", leftVal, rightVal));
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {leftVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", leftVal, "double"));
                     leftVal = convertedIdent;
                 }
-
                 if (rightType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {rightVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", rightVal, "double"));
                     rightVal = convertedIdent;
                 }
-
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fcmp ogt double", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "fcmp ogt", "double", leftVal, rightVal));
                 break;
             default:
                 break;
@@ -1939,12 +1916,12 @@ public class GreaterNode : ExpressionNode
     }
 }
 
-public class GreaterOrEqualNode : ExpressionNode
+public class GreaterOrEqualNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
 
-    public GreaterOrEqualNode(ExpressionNode lE, ExpressionNode rE)
+    public GreaterOrEqualNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -1994,24 +1971,22 @@ public class GreaterOrEqualNode : ExpressionNode
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "icmp sge i32", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "icmp sge", "i32", leftVal, rightVal));
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {leftVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", leftVal, "double"));
                     leftVal = convertedIdent;
                 }
-
                 if (rightType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {rightVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", rightVal, "double"));
                     rightVal = convertedIdent;
                 }
-
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fcmp oge double", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "fcmp oge", "double", leftVal, rightVal));
                 break;
             default:
                 break;
@@ -2021,12 +1996,12 @@ public class GreaterOrEqualNode : ExpressionNode
     }
 }
 
-public class LessNode : ExpressionNode
+public class LessNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
 
-    public LessNode(ExpressionNode lE, ExpressionNode rE)
+    public LessNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -2076,24 +2051,22 @@ public class LessNode : ExpressionNode
         switch (relationType)
         {
             case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "icmp slt i32", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "icmp slt", "i32", leftVal, rightVal));
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {leftVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", leftVal, "double"));
                     leftVal = convertedIdent;
                 }
-
                 if (rightType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {rightVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", rightVal, "double"));
                     rightVal = convertedIdent;
                 }
-
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fcmp olt double", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "fcmp olt", "double", leftVal, rightVal));
                 break;
             default:
                 break;
@@ -2103,12 +2076,12 @@ public class LessNode : ExpressionNode
     }
 }
 
-public class LessOrEqualNode : ExpressionNode
+public class LessOrEqualNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
 
-    public LessOrEqualNode(ExpressionNode lE, ExpressionNode rE)
+    public LessOrEqualNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -2157,42 +2130,39 @@ public class LessOrEqualNode : ExpressionNode
 
         switch (relationType)
         {
-            case CompilerType.Int_Type:
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "icmp sle i32", leftVal, rightVal);
+            case CompilerType.Int_Type:    
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "icmp sle", "i32", leftVal, rightVal));
                 break;
             case CompilerType.Double_type:
                 if (leftType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {leftVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", leftVal, "double"));
                     leftVal = convertedIdent;
                 }
-
                 if (rightType == CompilerType.Int_Type)
                 {
                     string convertedIdent = Compiler.NewValueIdent();
-                    Compiler.EmitCode($"{convertedIdent} = sitofp i32 {rightVal} to double");
+                    Compiler.EmitCode(LLVMCodeGenerator.ConvertOperation(convertedIdent, "sitofp", "i32", rightVal, "double"));
                     rightVal = convertedIdent;
                 }
-
-                Compiler.EmitCode("{0} = {1} {2}, {3}", tempVal, "fcmp ole double", leftVal, rightVal);
+                Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(tempVal, "fcmp ole", "double", leftVal, rightVal));
                 break;
             default:
                 break;
         }
-
         return tempVal;
     }
 }
 
 // LOGICAL_EXPR
-public class LogicalAndNode : ExpressionNode
+public class LogicalAndNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
     string logicalOpPtr;
 
-    public LogicalAndNode(ExpressionNode lE, ExpressionNode rE)
+    public LogicalAndNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -2234,33 +2204,32 @@ public class LogicalAndNode : ExpressionNode
         string endComparison = "endComparison" + curCondIndex;
         string leftValBool = Compiler.NewValueIdent();
 
-
         string leftVal = leftExpression.GenCode();
-        Compiler.EmitCode($"{leftValBool} = icmp eq i1 1, {leftVal}");
-        Compiler.EmitCode($"br i1 {leftValBool}, label %{checkRExp}, label %{outputIsFalseLabel}");
-        Compiler.EmitCode($"{checkRExp}:");
+        Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(leftValBool, "icmp eq", "i1", "1", leftVal));
+        Compiler.EmitCode(LLVMCodeGenerator.Br(leftValBool, checkRExp, outputIsFalseLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(checkRExp));
         string rightVal = rightExpression.GenCode();
-        Compiler.EmitCode($"{temp1} = and i1 {leftVal}, {rightVal}");
-        Compiler.EmitCode($"store i1 {temp1}, i1* {logicalOpPtr}");
-        Compiler.EmitCode($"br label %{endComparison}");
-        Compiler.EmitCode($"{outputIsFalseLabel}:");
-        Compiler.EmitCode($"{temp2} = icmp eq i1 1, {leftVal}");
-        Compiler.EmitCode($"store i1 {temp2}, i1* {logicalOpPtr}");
-        Compiler.EmitCode($"br label %{endComparison}");
-        Compiler.EmitCode($"{endComparison}:");
-        Compiler.EmitCode($"{outputVal} = load i1, i1* {logicalOpPtr}");
+        Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(temp1, "and", "i1", leftVal, rightVal));
+        Compiler.EmitCode(LLVMCodeGenerator.Store(logicalOpPtr, temp1, "i1"));
+        Compiler.EmitCode(LLVMCodeGenerator.Br(endComparison));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(outputIsFalseLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(temp2, "icmp eq", "i1", "1", leftVal));
+        Compiler.EmitCode(LLVMCodeGenerator.Store(logicalOpPtr, temp2, "i1"));
+        Compiler.EmitCode(LLVMCodeGenerator.Br(endComparison));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(endComparison));
+        Compiler.EmitCode(LLVMCodeGenerator.Load(outputVal, "i1", logicalOpPtr));
 
         return outputVal;
     }
 }
 
-public class LogicalOrNode : ExpressionNode
+public class LogicalOrNode : SyntaxTreeExpressionNode
 {
-    ExpressionNode leftExpression;
-    ExpressionNode rightExpression;
+    SyntaxTreeExpressionNode leftExpression;
+    SyntaxTreeExpressionNode rightExpression;
     string logicalOpPtr;
 
-    public LogicalOrNode(ExpressionNode lE, ExpressionNode rE)
+    public LogicalOrNode(SyntaxTreeExpressionNode lE, SyntaxTreeExpressionNode rE)
     {
         this.line = Compiler.lineno;
         leftExpression = lE;
@@ -2303,19 +2272,20 @@ public class LogicalOrNode : ExpressionNode
         string leftValBool = Compiler.NewValueIdent();
 
         string leftVal = leftExpression.GenCode();
-        Compiler.EmitCode($"{leftValBool} = icmp eq i1 1, {leftVal}");
-        Compiler.EmitCode($"br i1 {leftValBool}, label %{outputIsTrueLabel}, label %{checkRExp}");
-        Compiler.EmitCode($"{checkRExp}:");
+        Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(leftValBool, "icmp eq", "i1", "1", leftVal));
+        Compiler.EmitCode(LLVMCodeGenerator.Br(leftValBool, outputIsTrueLabel, checkRExp));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(checkRExp));
         string rightVal = rightExpression.GenCode();
-        Compiler.EmitCode($"{temp1} = or i1 {leftVal}, {rightVal}");
-        Compiler.EmitCode($"store i1 {temp1}, i1* {logicalOpPtr}");
-        Compiler.EmitCode($"br label %{endComparison}");
-        Compiler.EmitCode($"{outputIsTrueLabel}:");
-        Compiler.EmitCode($"{temp2} = icmp eq i1 1, {leftVal}");
-        Compiler.EmitCode($"store i1 {temp2}, i1* {logicalOpPtr}");
-        Compiler.EmitCode($"br label %{endComparison}");
-        Compiler.EmitCode($"{endComparison}:");
-        Compiler.EmitCode($"{outputVal} = load i1, i1* {logicalOpPtr}");
+        Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(temp1, "or", "i1", leftVal, rightVal));
+        Compiler.EmitCode(LLVMCodeGenerator.Store(logicalOpPtr, temp1, "i1"));
+        Compiler.EmitCode(LLVMCodeGenerator.Br(endComparison));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(outputIsTrueLabel));
+        Compiler.EmitCode(LLVMCodeGenerator.GenericValueOperation(temp2, "icmp eq", "i1", "1", leftVal));
+        Compiler.EmitCode(LLVMCodeGenerator.Store(logicalOpPtr, temp2, "i1"));
+        Compiler.EmitCode(LLVMCodeGenerator.Br(endComparison));
+        Compiler.EmitCode(LLVMCodeGenerator.Label(endComparison));
+        Compiler.EmitCode(LLVMCodeGenerator.Load(outputVal, "i1", logicalOpPtr));
+
         return outputVal;
     }
 }
