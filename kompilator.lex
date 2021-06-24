@@ -6,6 +6,7 @@ HexIntNumber  (0(x|X)([a-f0-9]+))
 RealNumber    (0|[1-9][0-9]*)\.[0-9]+
 Ident         [a-zA-z][a-zA-Z0-9]*
 Comment       \/\/.*\n
+LastCommentBeforeEof       \/\/.*
 Str        \"([^\\\"\n]|\\.)*\"
 
 %%
@@ -61,4 +62,5 @@ Str        \"([^\\\"\n]|\\.)*\"
 {Ident}       	    { yylval.value=yytext; return (int)Tokens.Ident; }
 {Str}				{ yylval.value=yytext; return (int)Tokens.Str; }
 {Comment}		    { Compiler.lineno++; }
+{LastCommentBeforeEof} { }
 .					{ return (int)Tokens.Error; }

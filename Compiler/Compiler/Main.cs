@@ -715,7 +715,7 @@ public class WriteHexExpressionNode : SyntaxTreeNode
     public override string GenCode()
     {
         string v = expression.GenCode();
-        Compiler.EmitCode(LLVMCodeGenerator.Write(5, "@hex_res", "i32", v));
+        Compiler.EmitCode(LLVMCodeGenerator.Write(5, "@hex_res", v, "i32"));
         return null;
     }
 }

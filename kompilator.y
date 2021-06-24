@@ -7,7 +7,7 @@ public SyntaxTreeExpressionNode             EXPnode;
 public SyntaxTreeNode                       STMTnode;
 }
 
-%token Program If Else While Read Write Return Int Double Bool Hex Eof Error
+%token Program If Else While Read Write Return Int Double Bool Hex Eof Error LastCommentBeforeEof
 %token Assign LogOr LogAnd BitOr BitAnd Equal Unequal Greater GreaterOrEqual Less LessOrEqual Plus Minus Multiplies Division LogNegation BitNegation LeftBracket RightBracket LeftCurlyBracket RightCurlyBracket Comma Semicolon
 
 %token <value>   IntNumber RealNumber Ident Str True False Type HexIntNumber
@@ -20,21 +20,30 @@ public SyntaxTreeNode                       STMTnode;
 START:          Program MAIN_CODE_BLOCK Eof
                 {
                     Compiler.rootNode = $2;
+                    YYACCEPT;
+                }
+|               Program MAIN_CODE_BLOCK LastCommentBeforeEof Eof
+                {
+                    Compiler.rootNode = $2;
+                    YYACCEPT;
                 }
 |               Program error Eof
                 {
                     Console.WriteLine("SYNTAX ERROR. LINE: " + Compiler.lineno);
                     Compiler.errors++;
+                    YYABORT;
                 }
 |               Program LeftBracket DECL_LIST STMT_LIST Eof
                 {
-                    Console.WriteLine("SYNTAX ERROR. LINE: " + Compiler.lineno);
+                    Console.WriteLine("UNEXPECTED EOF. LINE: " + Compiler.lineno);
                     Compiler.errors++;
+                    YYABORT;
                 }
 |               Eof
                 {
-                    Console.WriteLine("SYNTAX ERROR. LINE: " + Compiler.lineno);
+                    Console.WriteLine("UNEXPECTED EOF. LINE: " + Compiler.lineno);
                     Compiler.errors++;
+                    YYABORT;
                 }
 ;
 
@@ -44,8 +53,9 @@ MAIN_CODE_BLOCK:LeftCurlyBracket DECL_LIST STMT_LIST RightCurlyBracket
                 }
 |               LeftCurlyBracket DECL_LIST STMT_LIST Eof
                 {
-                    Console.WriteLine("SYNTAX ERROR. LINE: " + Compiler.lineno);
+                    Console.WriteLine("UNEXPECTED EOF. LINE: " + Compiler.lineno);
                     Compiler.errors++;
+                    YYABORT;
                 }
 ;
 
@@ -55,8 +65,9 @@ CODE_BLOCK:  LeftCurlyBracket STMT_LIST RightCurlyBracket
                     }
 |                   LeftCurlyBracket STMT_LIST Eof
                     {
-                        Console.WriteLine("SYNTAX ERROR. LINE: " + Compiler.lineno);
+                        Console.WriteLine("UNEXPECTED EOF. LINE: " + Compiler.lineno);
                         Compiler.errors++;
+                        YYABORT;
                     }
 ;
 
